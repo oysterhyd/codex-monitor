@@ -1,0 +1,72 @@
+# Codex Monitor
+
+Windows 桌面端 Codex 用量监测工具。查看 ChatGPT 订阅账号额度、本机 token 消耗、API 等值费用和运行指标。
+
+## 下载
+
+从 [Releases](https://github.com/oysterhyd/codex-monitor/releases/latest) 下载 Windows x64 安装包，运行后按提示安装。应用自带运行环境，无需安装 Node.js。
+
+安装包未签名，默认安装到当前用户目录。首次使用需在本机 Codex 中登录 ChatGPT 订阅账号。
+
+## 功能
+
+- 账户额度：各窗口剩余比例、重置时间、更新时间和历史曲线。
+- 本机用量：输入、缓存输入、输出 token，按日期、模型、项目和任务筛选。
+- 运行记录：每次任务的 token、输入与输出费用、合计、状态和耗时。
+- 运行指标：缓存命中率、任务平均输出速率、首 token 延迟和成功率。
+- 价格管理：按模型配置价格，保留价格版本，未知模型显示“未定价”。
+- 深浅主题、卡片动效、系统托盘、开机启动、额度提醒和 CSV 导出。
+
+## 使用
+
+启动后自动读取本机 Codex 桌面端记录，随后持续增量更新。额度查询默认每 60 秒执行一次，可在设置中调整。
+
+关闭窗口会进入托盘；完全退出请使用托盘菜单。若未自动找到 Codex 可执行文件，可在设置中选择 `codex.exe`。
+
+监测数据保存在 `%APPDATA%\codex-monitor\monitor.sqlite`，也可以在设置中打开数据目录。数据库损坏时先备份再尝试恢复，备份位于 `recovery-backups/`；不可恢复的历史采样可能缺失。
+
+## 统计口径
+
+- 账户额度可能包含其他设备的使用；token 统计只覆盖本机 Codex Desktop，包括桌面端子任务，排除 CLI 和 IDE 扩展。
+- 缓存命中率 = 缓存输入 token / 输入 token。
+- USD 是按标准短上下文 API 价格计算的等值估算，不是订阅账单；不识别 Fast、长上下文或地区溢价。
+- 运行记录按完整任务汇总。输入费用包含普通输入、缓存输入和缓存写入，输出费用单独计算；未知价格不会按零处理。
+- 任务平均输出速率包含工具执行与等待时间。首 token 延迟仅统计实际提供该字段的任务。
+- 额度历史使用实际采样，采样点之间的连线不代表连续测量。查询失败时保留最近快照。
+- 清空历史保留设置和价格，之后仅采集新增记录。
+
+## 数据与隐私
+
+应用读取本机 `%CODEX_HOME%`（默认 `%USERPROFILE%\.codex`）中的桌面端统计记录，并通过本机 Codex App Server 查询额度。不会创建模型请求，不保存对话正文或账号凭据；额度查询使用 Codex 已有登录状态访问其服务。
+
+本仓库仅包含应用源码和资源，不包含本机数据库、日志、截图或测试文件。
+
+## 开发
+
+需要 Windows x64、Node.js 22.19+ 和 npm。
+
+```powershell
+npm ci
+npm start
+```
+
+```powershell
+npm run build
+npm run package
+```
+
+安装包输出到 `release/`。`npm run dev` 仅预览前端，完整桌面功能使用 `npm start`。
+
+技术栈：Electron、React、Vite、SQLite。统计采集运行在后台 Worker，界面通过 IPC 读取数据。
+
+## 0.1.3
+
+- 运行记录新增输入 / 输出 token、对应费用及合计。
+- 修复“全部”额度历史日期刻度重叠。
+- 精简页面说明与常驻提示。
+- 包含此前的数据库恢复、额度刷新等待和默认价格修正。
+
+## 参考
+
+- [Codex App Server](https://learn.chatgpt.com/docs/app-server)
+- [OpenAI API 定价](https://developers.openai.com/api/docs/pricing)
