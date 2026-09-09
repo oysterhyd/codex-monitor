@@ -20,8 +20,6 @@ import {
   Stack,
   Target,
   FolderOpen,
-  UserCircle,
-  CaretDown,
 } from "@phosphor-icons/react";
 import "./style.css";
 import "./glass.css";
@@ -29,6 +27,7 @@ import { tr, setLanguage, dateLocale, systemText } from "./i18n.mjs";
 import monitorIcon from "../assets/monitor-glass.png";
 import { createRefresh } from "./refresh.mjs";
 import { chartPaths } from "./chart-paths.mjs";
+import { Widget } from "./widget.jsx";
 
 const api = window.monitor;
 const compact = (n) =>
@@ -531,7 +530,6 @@ function App() {
                     </div>
                   )}
                   <div className="account-control">
-                    <UserCircle size={19} aria-hidden="true" />
                     <select aria-label={tr("账号筛选")} value={filter.account || ""}
                       onChange={e => { setFilter(f => ({ range: f.range, start: f.start, end: f.end, account: e.target.value })); setQuotaKey(""); }}>
                       <option value="current">{tr("当前账号")} · {accountLabel(data.currentAccount)}</option>
@@ -541,7 +539,6 @@ function App() {
                       {filter.account === data.currentAccount && <option value={data.currentAccount}>{accountLabel(data.currentAccount)}</option>}
                       <option value="unassigned">{tr("未归属")}</option>
                     </select>
-                    <CaretDown size={14} aria-hidden="true" />
                   </div>
                   {page !== "quota" && (
                     <>
@@ -591,7 +588,6 @@ function App() {
                   )}
                 </div>
               )}
-              {page === "history" && <AccountAssignment data={data} filter={filter} act={act} busy={busy} />}
               {(page === "overview" || page === "history") && (
                 <>
                   <div className="metrics">
@@ -911,7 +907,6 @@ function App() {
                               </tr>
                               {expanded===t.id && <tr className="record-expanded"><td colSpan={8}>
                                 <div>{tr("完整任务 ·")}{t.id}</div>
-                                <TaskAccount record={t} data={data} filter={filter} act={act} busy={busy} />
                                 <div className="model-details">{t.models?.map(m=><div key={m.model}>
                                   <strong>{m.model}</strong><span>{tr("输入 {0} · 缓存 {1} · 输出 {2}", full(m.input), full(m.cached), full(m.output))}</span>
                                   <span>{tr("输入 {0} · 输出 {1} · 合计 {2}", recordMoney(m.inputCost,m), recordMoney(m.outputCost,m), recordMoney(m.cost,m))}</span>
@@ -999,27 +994,6 @@ function App() {
   );
 }
 
-function attributionAccount(data, filter) {
-  const id = filter.account === "current" ? data.currentAccount : filter.account;
-  return data.accounts?.find(a => a.id === id);
-}
-function TaskAccount({ record, data, filter, act, busy }) {
-  const account = attributionAccount(data, filter);
-  return account ? <button className="button" disabled={busy}
-    onClick={() => act(() => api.assignAccount({account:account.id,turn:record.id,session:record.session,range:"all"}), tr("账号归属已更新"))}>
-    {tr("归属至 {0}", account.label)}
-  </button> : null;
-}
-function AccountAssignment({ data, filter, act, busy }) {
-  const account = attributionAccount(data, filter);
-  return account ? <div className="attribution-toolbar">
-    <span>{tr("历史记录归属")}</span>
-    <button className="text-button" disabled={busy} title={tr("缺少账号信息的旧记录保留为未归属。确认日期范围后，可将该范围内全部未归属用量、任务和额度记录指定给一个账号。")}
-      onClick={() => act(() => api.assignAccount({ range: filter.range, start: filter.start, end: filter.end, account: account.id }), tr("账号归属已更新"))}>
-      {tr("将未归属记录归入 {0}", account.label)}
-    </button>
-  </div> : null;
-}
 function AccountManager({ data, act, busy }) {
   const [label, setLabel] = useState("");
   return <Panel title={tr("账号管理")} className="settings-wide">
@@ -1301,4 +1275,4 @@ function Settings({ data, act, busy }) {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(new URLSearchParams(location.search).has('widget') ? <Widget /> : <App />);

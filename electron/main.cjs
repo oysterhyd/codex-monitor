@@ -11,10 +11,12 @@ const {
 } = require("electron");
 const { WorkerManager } = require("./worker-manager.cjs");
 const { readQuota, stopQueries } = require("./quota.cjs");
+const { createWidget } = require("./widget-window.cjs");
 const path = require("node:path"),
   fs = require("node:fs"),
   os = require("node:os");
 let win,
+  widget,
   tray,
   worker,
   quitting = false,
@@ -27,20 +29,29 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (win) {
-      win.show();
-      win.focus();
-    }
+    if (win) restoreMain();
   });
-  function request(method, args) { return worker.request(method,args); }
+  function restoreMain() {
+    widget?.hide();
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+  function request(method, args) {
+    if (quitting) return Promise.reject(new Error('应用正在退出'));
+    return worker.request(method,args);
+  }
   function notifyUI(data) {
+    if (quitting) return;
     if (win && !win.isDestroyed()) win.webContents.send("update", data);
+    if (widget && !widget.window.isDestroyed() && widget.window.isVisible()) widget.window.webContents.send("update");
   }
   function trayMenu() {
     tray.setToolTip(tr("Codex Monitor · 本机用量监测"));
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: tr("打开 Codex Monitor"), click: () => win.show() },
+        { label: tr("打开 Codex Monitor"), click: restoreMain },
+        { label: "桌面小组件 / Desktop widget", click: () => { win.minimize(); widget.show(); } },
         { label: tr("刷新额度"), click: () => request("refresh").catch(() => {}) },
         {
           label: tr("静音提醒"),
@@ -135,14 +146,18 @@ if (!app.requestSingleInstanceLock()) {
       if (!quitting) {
         event.preventDefault();
         win.hide();
+        widget?.show();
       }
     });
+    win.on("minimize", () => widget?.show());
+    win.on("restore", () => widget?.hide());
+    win.on("show", () => { if (!win.isMinimized()) widget?.hide(); });
     win.once("ready-to-show", () => {
-      if (!process.argv.includes("--hidden")) win.show();
+      if (!process.argv.includes("--hidden") && !win.isMinimized()) win.show();
     });
     tray = new Tray(path.join(__dirname, "../assets/icon.png"));
     tray.setToolTip(tr("Codex Monitor · 本机用量监测"));
-    tray.on("double-click", () => win.show());
+    tray.on("double-click", restoreMain);
     trayMenu();
     const handle = (name, fn) =>
       ipcMain.handle(name, (event, arg) => {
@@ -220,6 +235,15 @@ if (!app.requestSingleInstanceLock()) {
     });
     handle("openData", () => shell.openPath(data));
     await win.loadFile(path.join(__dirname, "../dist/index.html"));
+    widget = createWidget({ data, restore: restoreMain, refresh: () => request("refresh").catch(() => {}) });
+    for (const [name, fn] of Object.entries({ snapshot: () => request("widget"), restore: restoreMain,
+      menu: () => widget.menu(), refresh: () => request("refresh") })) {
+      ipcMain.handle(`widget:${name}`, event => {
+        if (event.sender !== widget.window.webContents) throw new Error(tr("无效来源"));
+        return fn();
+      });
+    }
+    if (win.isMinimized()) widget.show();
     request("snapshot", {})
       .then((s) => {
         settings = s.settings;
@@ -235,6 +259,9 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     if(pendingShutdown)return;
     quitting = true;
+    // Dispose the transparent surface before Electron starts closing native windows.
+    // Its renderer must not keep queuing snapshots while the database shuts down.
+    if (widget && !widget.window.isDestroyed()) widget.window.destroy();
     stopQueries();
     pendingShutdown=true;
     worker.shutdown().catch(()=>{}).finally(()=>{databaseClosed=true;app.quit();});

@@ -31,10 +31,16 @@ function observeAccount(store, home, now = new Date().toISOString()) {
   const account = readAccount(home);
   const id = account?.id || UNKNOWN;
   if (account) store.db.prepare('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').run(id, account.label, 'detected');
-  if (id !== store.observedAccount || !store.observationId || Date.parse(now) - (store.lastAccountObservation || 0) > 15000) {
-    store.observedAccount = id;
+  // Resume the persisted interval when the observed identity is unchanged.
+  // A real identity change (including logout) still starts a separate interval.
+  const previous = store.db.prepare('SELECT * FROM account_observations ORDER BY id DESC LIMIT 1').get();
+  if (previous?.account === id && now >= previous.ended) {
+    store.observationId = previous.id;
+    store.db.prepare('UPDATE account_observations SET ended=? WHERE id=?').run(now, previous.id);
+  } else {
     store.observationId = Number(store.db.prepare('INSERT INTO account_observations(account,started,ended) VALUES(?,?,?)').run(id, now, now).lastInsertRowid);
-  } else store.db.prepare('UPDATE account_observations SET ended=? WHERE id=?').run(now, store.observationId);
+  }
+  store.observedAccount = id;
   store.lastAccountObservation = Date.parse(now);
   store.set('currentAccount', id);
   return id;

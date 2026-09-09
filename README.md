@@ -4,11 +4,24 @@ Windows desktop application for monitoring local Codex usage, account quotas, to
 
 ## Download
 
-[Download v1.0.6 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v1.0.6)
+[Download v2.0.0 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.0.0)
 
-Run `Codex-Monitor-Setup-1.0.6.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
+Run `Codex-Monitor-Setup-2.0.0.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
 
 The installer is unsigned. Automatic updates and cross-device synchronization are not included.
+
+## 2.0.0 — Desktop widget / 桌面小组件
+
+Minimize or close the main window to keep a glass desktop widget visible. Drag its header to move it; double-click the header or click the app icon to return. The options menu supports always-on-top, refresh, and hide. Position and pin state persist locally.
+
+- Reference-inspired translucent glass, continuous rounded corners, four metric cards and a 24-hour token chart. This is a Windows/CSS approximation, not Apple's native Liquid Glass material.
+- Current-account remaining 5h and weekly quota; expired values wait for a fresh sample and offline snapshots are marked stale.
+- Live TPS uses output tokens recorded in the last 60 seconds divided by 60, refreshed every 3 seconds. It includes idle time and is not exact generation throughput.
+- Current-account daily tokens, yesterday comparison, token-weighted cache hit rate, and rolling 24-hour usage. No cross-account quota totals.
+- Restricted widget bridge, hidden-window polling pause, background collection, Chinese/English, and failure/loading states.
+- Preserves the existing account observation continuity and account selector simplification. Manual record assignment controls are no longer shown in History.
+
+Validation: 42 unit checks plus main-window and installed-widget smoke checks, including minimize/restore, ongoing collection, expired quotas, disconnected state, and visual layout. Test fixtures and private usage screenshots are excluded from this repository.
 
 ## 1.0.6
 

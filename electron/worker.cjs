@@ -2,6 +2,7 @@ const { readAccount, saveAccount, assignUnknown, UNKNOWN } = require("./accounts
 const { parentPort, workerData } = require("node:worker_threads");
 const { openStore } = require("./recovery.cjs");
 const { summarize, csv, exportRows } = require("./metrics.cjs");
+const { widgetSnapshot } = require("./widget-data.cjs");
 const store = openStore(workerData.db);
 let scanning = false,
   shutting = false;
@@ -95,6 +96,9 @@ parentPort.on("message", (msg) => {
           return;
         case "snapshot":
           result = summarize(store, msg.args);
+          break;
+        case "widget":
+          result = widgetSnapshot(store);
           break;
         case "account":
           result = saveAccount(store, msg.args);

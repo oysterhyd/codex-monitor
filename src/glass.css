@@ -94,16 +94,11 @@ button:active:not(:disabled) { transform: scale(.97); }
 
 
 .account-control { position: relative; display: flex; align-items: center; flex: 0 1 220px; min-width: 160px; color: var(--accent); }
-.account-control > svg { position: absolute; left: 13px; pointer-events: none; z-index: 1; }
-.account-control > svg:last-child { left: auto; right: 13px; color: var(--muted); }
-.account-control select { appearance: none; width: 100%; max-width: none; padding: 9px 34px 9px 41px; text-overflow: ellipsis; color: var(--text); background: var(--panel); cursor: pointer; box-shadow: 0 4px 12px var(--shadow); transition: border-color 180ms, box-shadow 180ms; }
-.account-control select:hover { border-color: var(--accent-border); }
+.account-control select { width: 100%; max-width: none; text-overflow: ellipsis; cursor: pointer; }
 .quota-window-selector { position: relative; isolation: isolate; display: inline-grid; grid-template-columns: repeat(var(--segment-count), minmax(0, 1fr)); gap: 0; max-width: 100%; }
 .quota-window-selector .range-lens { width: calc((100% - 8px) / var(--segment-count)); }
 .quota-window-selector button { position: relative; z-index: 1; justify-content: center; }
 .quota-window-selector button.active { background: transparent; box-shadow: none; }
-.attribution-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: -8px 0 18px; font-size: 12px; color: var(--muted); }
-.attribution-toolbar .text-button { color: var(--accent); padding: 6px 0; text-align: left; }
 @media (max-width: 600px) { .filters > .account-control { flex: 1 1 100%; margin-left: 0; } .quota-window-selector button { white-space: normal; } }
 
 .chart-scene { animation: chart-scene-enter 360ms ease-out both; }
