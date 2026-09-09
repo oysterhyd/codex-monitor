@@ -1,5 +1,12 @@
 # Codex Monitor
 
+<p align="center">
+  <img src="assets/screenshots/app-overview.png" alt="Usage overview" />
+</p>
+<p align="center">
+  <img src="assets/screenshots/desktop-widget.png" width="380" alt="Desktop widget" />
+</p>
+
 Windows desktop application for monitoring local Codex usage, account quotas, token costs, and task performance. Supports 简体中文 and English, and ships a liquid-glass style desktop widget.
 
 ## Download
