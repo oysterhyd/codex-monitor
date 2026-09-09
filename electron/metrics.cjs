@@ -58,6 +58,11 @@ function summarize(store, filter = {}) {
   const prices = store.prices();
   const sessions = store.db.prepare("SELECT * FROM sessions").all(),
     sessionMap = new Map(sessions.map((s) => [s.id, s]));
+  // Resolve account membership once, rather than querying each session twice per snapshot.
+  const accountSessions = filter.account
+    ? new Set(store.db.prepare("SELECT DISTINCT session FROM usage WHERE account=?").all(filter.account).map(r => r.session))
+    : null;
+  const availableSessions = accountSessions ? sessions.filter(s => accountSessions.has(s.id)) : sessions;
   const accepts = (r) =>
     (!filter.account || r.account === filter.account || store.db.prepare("SELECT 1 FROM usage WHERE turn=? AND session=? AND account=? LIMIT 1").get(r.id,r.session,filter.account)) &&
     (!filter.model || r.model === filter.model) &&
@@ -186,9 +191,9 @@ function summarize(store, filter = {}) {
   const quotaParams = [quotaAccount];
   const analyticsAccountParams = filter.account ? [filter.account] : [];
   const latest = store.db.prepare(`SELECT q.* FROM
-    (SELECT DISTINCT account,bucket,slot FROM quotas) b JOIN quotas q ON q.rowid=(
+    (SELECT DISTINCT account,bucket,slot FROM quotas WHERE account=?) b JOIN quotas q ON q.rowid=(
       SELECT rowid FROM quotas WHERE account=b.account AND bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)
-    WHERE q.account=?`).all(...quotaParams);
+    `).all(...quotaParams);
   const history = [];
   let historySamples = 0;
   if(historyWanted) {
@@ -276,8 +281,8 @@ function summarize(store, filter = {}) {
         .prepare(`SELECT DISTINCT model FROM usage ${filter.account ? "WHERE account=?" : ""} ORDER BY model`)
         .all(...analyticsAccountParams)
         .map((r) => r.model),
-      projects: [...new Set(sessions.filter(s => !filter.account || store.db.prepare("SELECT 1 FROM usage WHERE session=? AND account=? LIMIT 1").get(s.id,filter.account)).map((s) => s.project))].sort(),
-      sessions: sessions.filter(s => !filter.account || store.db.prepare("SELECT 1 FROM usage WHERE session=? AND account=? LIMIT 1").get(s.id,filter.account)).map((s) => ({ id: s.id, project: s.project })),
+      projects: [...new Set(availableSessions.map((s) => s.project))].sort(),
+      sessions: availableSessions.map((s) => ({ id: s.id, project: s.project })),
     },
     settings: store.settings(),
     prices,
