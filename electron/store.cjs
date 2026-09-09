@@ -2,6 +2,7 @@ const { DatabaseSync } = require("node:sqlite");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { migrateAccounts, observeAccount, accountAt, UNKNOWN } = require("./accounts.cjs");
 const officialPrices = require("./official-prices.cjs");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const iso = (value) => {
@@ -14,6 +15,7 @@ const number = (value) =>
     : null;
 const defaults = {
   theme: "system",
+  language: "zh-CN",
   muted: false,
   autoStart: false,
   quotaInterval: 60,
@@ -40,6 +42,7 @@ class Store {
       CREATE TABLE IF NOT EXISTS prices(id INTEGER PRIMARY KEY,model TEXT,effective TEXT,input REAL,cached REAL,output REAL,cache_write REAL,source TEXT);
       CREATE TABLE IF NOT EXISTS notices(id TEXT PRIMARY KEY,ts TEXT);
     `);
+    migrateAccounts(this);
     if (!this.get("seeded")) {
       const rates = officialPrices.rates;
       for (const [model, input, cached, output, write] of rates)
@@ -131,6 +134,7 @@ class Store {
   }
   saveSettings(input) {
     const next = this.settings();
+    if (["zh-CN", "en"].includes(input.language)) next.language = input.language;
     if (["system", "light", "dark"].includes(input.theme))
       next.theme = input.theme;
     for (const k of ["muted", "autoStart"])
@@ -181,7 +185,7 @@ class Store {
       )
       .all();
   }
-  addQuota(raw, ts, source = "日志") {
+  addQuota(raw, ts, source = "日志", account = accountAt(this, ts)) {
     if (
       !raw ||
       !iso(ts) ||
@@ -196,10 +200,11 @@ class Store {
         minutes = number(w.windowDurationMins ?? w.window_minutes),
         resets = number(w.resetsAt ?? w.resets_at);
       if (used === null || minutes === null) continue;
+      if (source === "日志" && this.db.prepare("SELECT 1 FROM quotas WHERE ts=? AND bucket=? AND slot=? AND used=? AND resets IS ? AND source=? LIMIT 1").get(ts,bucket,slot,Math.min(100,used),resets,source)) continue;
       this.db
-        .prepare("INSERT OR IGNORE INTO quotas VALUES(?,?,?,?,?,?,?,?,?)")
+        .prepare("INSERT OR IGNORE INTO quotas(id,ts,bucket,slot,used,minutes,resets,plan,source,account) VALUES(?,?,?,?,?,?,?,?,?,?)")
         .run(
-          hash([ts, bucket, slot, used, resets].join("|")),
+          hash([account, ts, bucket, slot, used, resets].join("|")),
           ts,
           bucket,
           slot,
@@ -208,6 +213,7 @@ class Store {
           resets,
           raw.planType || raw.plan_type || null,
           source,
+          account,
         );
     }
   }
@@ -239,7 +245,7 @@ class Store {
         s.modern = false;
         if (allowed)
           this.db
-            .prepare("INSERT OR IGNORE INTO turns VALUES(?,?,?,?,?,?,?,?,?)")
+            .prepare("INSERT OR IGNORE INTO turns(id,session,model,started,ended,status,duration,ttft,last_seen,account) VALUES(?,?,?,?,?,?,?,?,?,?)")
             .run(
               s.turn,
               s.session,
@@ -250,6 +256,7 @@ class Store {
               null,
               null,
               ts,
+              accountAt(this, ts),
             );
       }
       if (p.type === "task_complete" || p.type === "turn_aborted") {
@@ -326,7 +333,7 @@ class Store {
       cached = number(u.cached_input_tokens) ?? 0;
     if (input === null || output === null || cached > input) return;
     this.db
-      .prepare(`INSERT OR ${this.replayingRecovered ? "REPLACE" : "IGNORE"} INTO usage VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+      .prepare(`INSERT OR ${this.replayingRecovered ? "REPLACE" : "IGNORE"} INTO usage(id,session,turn,ts,model,input,cached,output,reasoning,cache_write,kind,account) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(
         id,
         s.session,
@@ -339,6 +346,7 @@ class Store {
         number(u.reasoning_output_tokens) ?? 0,
         number(u.cache_write_input_tokens) ?? 0,
         kind,
+        this.db.prepare("SELECT account FROM usage WHERE id=?").get(id)?.account || accountAt(this, ts),
       );
     if (s.turn)
       this.db
@@ -346,6 +354,7 @@ class Store {
         .run(s.model || "unknown", ts, s.turn);
   }
   async scan(home, onProgress = () => {}, options = {}) {
+    observeAccount(this, home);
     this.replayingRecovered = !!this.get("replayRecovered");
     const now = Date.now();
     const full = options.full || !this.catalog || this.catalogHome !== home || now - this.lastDiscovery >= 60000;
@@ -443,6 +452,13 @@ class Store {
       }
       scanned++;
       if (scanned % 10 === 0) onProgress({ scanned, total: files.length });
+    }
+    // Records appended while a scan was in progress may be read after the observation boundary.
+    // On the next observation, attach only timestamps within this verified interval.
+    const observation = this.db.prepare("SELECT * FROM account_observations WHERE id=?").get(this.observationId);
+    if (observation?.account !== UNKNOWN) {
+      for (const [table,time] of [["usage","ts"],["turns","started"],["quotas","ts"]])
+        this.db.prepare(`UPDATE ${table} SET account=? WHERE account=? AND ${time}>=? AND ${time}<=?`).run(observation.account,UNKNOWN,observation.started,observation.ended);
     }
     const status = {
       scanned,

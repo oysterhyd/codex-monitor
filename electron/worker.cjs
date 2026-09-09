@@ -1,3 +1,4 @@
+const { readAccount, saveAccount, assignUnknown, UNKNOWN } = require("./accounts.cjs");
 const { parentPort, workerData } = require("node:worker_threads");
 const { openStore } = require("./recovery.cjs");
 const { summarize, csv, exportRows } = require("./metrics.cjs");
@@ -33,6 +34,7 @@ function quota() {
   return quotaTask;
 }
 async function queryQuota() {
+  const before = readAccount(workerData.home)?.id || UNKNOWN;
   try {
     const q = await readQuota({
       codexHome: workerData.home,
@@ -40,13 +42,16 @@ async function queryQuota() {
     });
     while (scanning) await new Promise((r) => setTimeout(r, 30));
     if(shutting)return;
+    const after = readAccount(workerData.home)?.id || UNKNOWN;
+    if (before !== after) { emit("updated", null); return; }
     const groups = q.result.rateLimitsByLimitId || {
       codex: q.result.rateLimits,
     };
     for (const r of Object.values(groups))
-      store.addQuota(r, q.timestamp, "在线查询");
-    store.set("quotaStatus", { ok: true, attempted: q.timestamp });
+      store.addQuota(r, q.timestamp, "在线查询", before);
+    store.set("quotaStatus", { ok: true, attempted: q.timestamp, account: before });
     emit("quota", {
+      account: before,
       groups: Object.values(groups),
       muted: store.settings().muted,
     });
@@ -55,6 +60,7 @@ async function queryQuota() {
     while (scanning) await new Promise((r) => setTimeout(r, 30));
     if(shutting)return;
     store.set("quotaStatus", {
+      account: before,
       ok: false,
       attempted: new Date().toISOString(),
       reason: e.message,
@@ -89,6 +95,12 @@ parentPort.on("message", (msg) => {
           return;
         case "snapshot":
           result = summarize(store, msg.args);
+          break;
+        case "account":
+          result = saveAccount(store, msg.args);
+          break;
+        case "assignAccount":
+          result = assignUnknown(store, msg.args);
           break;
         case "settings":
           result = store.saveSettings(msg.args);

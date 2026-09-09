@@ -1,86 +1,71 @@
 # Codex Monitor
 
-Windows 桌面端 Codex 用量监测工具。查看 ChatGPT 订阅账号额度、本机 token 消耗、API 等值费用和运行指标。
+Windows desktop application for monitoring local Codex usage, account quotas, token costs, and task performance. Supports 简体中文 and English.
 
-## 下载
+## Download
 
-从 [Releases](https://github.com/oysterhyd/codex-monitor/releases/latest) 下载 Windows x64 安装包，运行后按提示安装。应用自带运行环境，无需安装 Node.js。
+[Download v1.0.0 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v1.0.0)
 
-安装包未签名，默认安装到当前用户目录。首次使用需在本机 Codex 中登录 ChatGPT 订阅账号。
+Run `Codex-Monitor-Setup-1.0.0.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
 
-## 功能
+The installer is unsigned. Automatic updates and cross-device synchronization are not included.
 
-- 账户额度：各窗口剩余比例、重置时间、更新时间和历史曲线。
-- 本机用量：输入、缓存输入、输出 token，按日期、模型、项目和任务筛选。
-- 运行记录：每次任务的 token、输入与输出费用、合计、状态和耗时。
-- 运行指标：缓存命中率、任务平均输出速率、首 token 延迟和成功率。
-- 价格管理：按模型配置价格，保留价格版本，未知模型显示“未定价”。
-- 深浅主题、卡片动效、系统托盘、开机启动、额度提醒和 CSV 导出。
+## 1.0.0
 
-## 使用
+- View usage, estimated costs, task records, runtime metrics, quota history, and CSV exports by account.
+- Add historical accounts and edit their display names in **Settings → Account management**.
+- Assign unassigned records by date range in **History**. Expand a task record to assign or correct that task individually; task assignment does not change quota snapshots.
+- Account-specific quota snapshots remain separate, including identically named quota windows.
+- Centered glass navigation, rounded panels, animated charts and date-range controls.
+- Persistent Chinese/English language selection, including tray menus and confirmation dialogs.
+- Existing statistics, pricing, and settings migrate on upgrade.
 
-启动后自动读取本机 Codex 桌面端记录，随后持续增量更新。额度查询默认每 60 秒执行一次，可在设置中调整。
+## 多账号使用
 
-关闭窗口会进入托盘；完全退出请使用托盘菜单。若未自动找到 Codex 可执行文件，可在设置中选择 `codex.exe`。
+1. 顶部筛选区选择「全部账号」、某个账号或「未归属」，总览、历史、额度和 CSV 导出同步筛选。
+2. 在「设置与价格 → 账号管理」添加历史账号或修改名称。
+3. 旧记录缺少账号信息时不会自动归入当前账号。在「历史分析」确认日期范围，再选择账号并点击「指定未归属记录」。此批量操作覆盖该时间范围的未归属用量、任务与额度，不受模型、项目筛选影响。
+4. 同一天使用多个账号时，可展开「任务运行记录」，选择账号并点击「归属此任务」。它只更改该任务的用量与任务记录，不修改额度快照。
+5. 旧账号可查看保留的记录；在线额度查询只使用当前 Codex 登录账号，不会自动登录其他账号。
 
-监测数据保存在 `%APPDATA%\codex-monitor\monitor.sqlite`，也可以在设置中打开数据目录。数据库损坏时先备份再尝试恢复，备份位于 `recovery-backups/`；不可恢复的历史采样可能缺失。
+## Account attribution boundaries
 
-## 统计口径
+Codex statistical logs generally do not contain an account identifier. Pre-upgrade records remain **Unassigned** until you assign them; they are not assumed to belong to the current login.
 
-- 账户额度可能包含其他设备的使用；token 统计只覆盖本机 Codex Desktop，包括桌面端子任务，排除 CLI 和 IDE 扩展。
-- 缓存命中率 = 缓存输入 token / 输入 token。
-- USD 是按标准短上下文 API 价格计算的等值估算，不是订阅账单；不识别 Fast、长上下文或地区溢价。
-- 运行记录按完整任务汇总。输入费用包含普通输入、缓存输入和缓存写入，输出费用单独计算；未知价格不会按零处理。
-- 任务平均输出速率包含工具执行与等待时间。首 token 延迟仅统计实际提供该字段的任务。
-- 额度历史使用实际采样，采样点之间的连线不代表连续测量。查询失败时保留最近快照。
-- 清空历史保留设置和价格，之后仅采集新增记录。
+While monitoring is running, account attribution uses sampled local sign-in state and record timestamps. Gaps during account changes, application shutdown, or pauses longer than 15 seconds remain unassigned. A very brief switch away and back between observations may not be detected; task attribution can be corrected manually. A shared task spanning accounts shows only the selected account’s usage contributions, while task duration remains the duration recorded for the whole task.
 
-## 数据与隐私
+Account identity combines the selected account and login user into a SHA-256 identifier. The database stores only that identifier and a display name. It does not store passwords, authentication tokens, or API keys. Original Codex logs are not modified.
 
-应用读取本机 `%CODEX_HOME%`（默认 `%USERPROFILE%\.codex`）中的桌面端统计记录，并通过本机 Codex App Server 查询额度。不会创建模型请求，不保存对话正文或账号凭据；额度查询使用 Codex 已有登录状态访问其服务。
+## Features
 
-本仓库仅包含应用源码和资源，不包含本机数据库、日志、截图或测试文件。
+- Overview: remaining quota, tokens, API-equivalent estimated cost, cache hit rate, model distribution, and output speed.
+- History: model/project/task breakdown, paginated task records, per-model cost details, and account attribution.
+- Quota: latest window snapshots and step charts that preserve reset boundaries and sampling gaps.
+- Settings: language, theme, launch at sign-in, quota alert muting, query interval, data locations, model price versions, and account names.
+- Incremental background collection with worker recovery and database corruption backup/recovery.
+- CSV export of the current filters, including the account identifier. Formula-like CSV values are escaped.
 
-## 开发
+## Measurement and privacy
 
-需要 Windows x64、Node.js 22.19+ 和 npm。
+API-equivalent cost is an estimate, not a subscription bill. Included price defaults use Standard short-context rates verified on 2026-09-09; long-context, Fast, regional adjustments, and later price changes may require manual pricing versions. Unknown model prices remain unpriced.
+
+Quota snapshots may include activity on other devices. Token statistics cover locally available Codex Desktop statistical records. CLI-origin sessions are excluded. Task output rates include tool and wait time; generation-only speed is not available from these logs.
+
+Only statistical records are parsed into the monitoring database; message and tool bodies are not stored. Online quota queries use the existing local Codex App Server authentication. Data stays on the local computer. Database recovery preserves readable settings, pricing, account metadata, and manual usage attribution; corrupt historical samples may be unavailable. Backups are retained in the data directory.
+
+## Build from source
+
+Requires Windows, Node.js with `node:sqlite` support, npm, and a local Codex installation for live data.
 
 ```powershell
 npm ci
-npm start
-```
-
-```powershell
 npm run build
+npm start
 npm run package
 ```
 
-安装包输出到 `release/`。`npm run dev` 仅预览前端，完整桌面功能使用 `npm start`。
+Built installers are written to `release/`. Browser-only development (`npm run dev`) previews the shell without connecting to local account data. The public repository contains the application source; local integration fixtures, account data, screenshots, and credentials are excluded.
 
-技术栈：Electron、React、Vite、SQLite。统计采集运行在后台 Worker，界面通过 IPC 读取数据。
+## Stack
 
-## 0.1.5
-
-- 额度历史改为阶梯线，跨重置时间或周期变更断开曲线及填充，不再显示斜坡恢复，也不补造未采样数据。
-- 设置与价格页移除固定宽度限制，宽窗口双栏布局、价格区域占满整行，窄窗口自动改为单列。
-
-## 0.1.4
-
-- 优化 SQLite 索引与批量聚合，按页面加载数据，减少长期运行后的查询开销。
-- 合并快照刷新请求，数据变化时更新；隐藏窗口暂停界面刷新，30 秒轮询兜底。
-- 近期文件每 3 秒检查，冷文件及归档每 60 秒完整校验；手动刷新立即完整扫描。
-- 额度历史按当前范围查询，长范围保留实际端点、峰谷及重置周期，减少绘制点数。
-- 后台进程异常自动恢复，5 分钟内最多重启 3 次；诊断仅保存错误类别与文件哈希标识，不保存原始错误文本、路径、正文或凭据。`diagnostics.jsonl` 位于应用数据目录，约 256 KB 轮转并保留上一份。
-- 运行记录每页 50 条，可浏览全部筛选结果，并展开完整任务的各模型 token 与费用明细。模型筛选包含使用过该模型的任务，明细仍展示完整任务。
-
-## 0.1.3
-
-- 运行记录新增输入 / 输出 token、对应费用及合计。
-- 修复“全部”额度历史日期刻度重叠。
-- 精简页面说明与常驻提示。
-- 包含此前的数据库恢复、额度刷新等待和默认价格修正。
-
-## 参考
-
-- [Codex App Server](https://learn.chatgpt.com/docs/app-server)
-- [OpenAI API 定价](https://developers.openai.com/api/docs/pricing)
+Electron 44, React 19, Vite 8, SQLite, and Phosphor icons.

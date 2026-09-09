@@ -19,6 +19,8 @@ let win,
   worker,
   quitting = false,
   settings = {};
+const { translate } = require("./translate.cjs");
+const tr = (message, ...values) => translate(settings.language, message, ...values);
 const smoke = process.env.MONITOR_TEST_DATA;
 if (smoke) app.setPath("userData", path.resolve(smoke));
 if (!app.requestSingleInstanceLock()) {
@@ -35,12 +37,13 @@ if (!app.requestSingleInstanceLock()) {
     if (win && !win.isDestroyed()) win.webContents.send("update", data);
   }
   function trayMenu() {
+    tray.setToolTip(tr("Codex Monitor · 本机用量监测"));
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: "打开 Codex Monitor", click: () => win.show() },
-        { label: "刷新额度", click: () => request("refresh").catch(() => {}) },
+        { label: tr("打开 Codex Monitor"), click: () => win.show() },
+        { label: tr("刷新额度"), click: () => request("refresh").catch(() => {}) },
         {
-          label: "静音提醒",
+          label: tr("静音提醒"),
           type: "checkbox",
           checked: !!settings.muted,
           click: async (item) => {
@@ -51,7 +54,7 @@ if (!app.requestSingleInstanceLock()) {
         },
         { type: "separator" },
         {
-          label: "退出",
+          label: tr("退出"),
           click: () => {
             quitting = true;
             app.quit();
@@ -97,11 +100,11 @@ if (!app.requestSingleInstanceLock()) {
             const remaining = Math.max(0, 100 - w.usedPercent);
             for (const threshold of [20, 10])
               if (remaining <= threshold) {
-                const key = [q.limitId, slot, w.resetsAt, threshold].join(":");
+                const key = [msg.data.account, q.limitId, slot, w.resetsAt, threshold].join(":");
                 if (await request("notice", key).catch(()=>false))
                   new Notification({
-                    title: "Codex 额度提醒",
-                    body: `${q.limitName || q.limitId || "Codex"} · ${w.windowDurationMins} 分钟窗口剩余 ${remaining.toFixed(0)}%`,
+                    title: tr("Codex 额度提醒"),
+                    body: tr("{0} · {1} 分钟窗口剩余 {2}%", q.limitName || q.limitId || "Codex", w.windowDurationMins, remaining.toFixed(0)),
                     icon: path.join(__dirname, "../assets/icon.png"),
                   }).show();
               }
@@ -138,12 +141,12 @@ if (!app.requestSingleInstanceLock()) {
       if (!process.argv.includes("--hidden")) win.show();
     });
     tray = new Tray(path.join(__dirname, "../assets/icon.png"));
-    tray.setToolTip("Codex Monitor · 本机用量监测");
+    tray.setToolTip(tr("Codex Monitor · 本机用量监测"));
     tray.on("double-click", () => win.show());
     trayMenu();
     const handle = (name, fn) =>
       ipcMain.handle(name, (event, arg) => {
-        if (event.sender !== win.webContents) throw new Error("无效来源");
+        if (event.sender !== win.webContents) throw new Error(tr("无效来源"));
         return fn(arg);
       });
     handle("snapshot", async (filter) => {
@@ -175,10 +178,15 @@ if (!app.requestSingleInstanceLock()) {
       notifyUI();
       return settings;
     });
+    handle("account", value => request("account", value));
+    handle("assignAccount", async value => {
+      const result = await dialog.showMessageBox(win, { type: "question", title: tr("历史账号归属"), message: value.turn ? tr("将此任务的全部用量记录归属到所选账号？此操作不修改额度快照。") : tr("将当前时间范围内全部未归属记录指定给所选账号？"), buttons: [tr("取消"), tr("确认归属")], defaultId: 0, cancelId: 0 });
+      return result.response === 1 ? request("assignAccount", value) : null;
+    });
     handle("price", (value) => request("price", value));
     handle("export", async (filter) => {
       const result = await dialog.showSaveDialog(win, {
-        title: "导出当前筛选的用量",
+        title: tr("导出当前筛选的用量"),
         defaultPath: `codex-usage-${new Date().toISOString().slice(0, 10)}.csv`,
         filters: [{ name: "CSV", extensions: ["csv"] }],
       });
@@ -190,11 +198,11 @@ if (!app.requestSingleInstanceLock()) {
     handle("clear", async () => {
       const r = await dialog.showMessageBox(win, {
         type: "warning",
-        title: "清空监测历史",
-        message: "删除本应用已采集的用量和额度历史？",
+        title: tr("清空监测历史"),
+        message: tr("删除本应用已采集的用量和额度历史？"),
         detail:
-          "Codex 原始文件不会被修改。仅继续采集此刻之后的数据；已有历史不会自动重新导入。价格和设置保留。",
-        buttons: ["取消", "清空历史"],
+          tr("Codex 原始文件不会被修改。仅继续采集此刻之后的数据；已有历史不会自动重新导入。价格和设置保留。"),
+        buttons: [tr("取消"), tr("清空历史")],
         defaultId: 0,
         cancelId: 0,
       });

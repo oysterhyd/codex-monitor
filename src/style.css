@@ -974,17 +974,7 @@ code {
     grid-template-columns: repeat(2, 1fr);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *:before,
-  *:after {
-    animation: none !important;
-    transition: none !important;
-  }
-  .metric:hover {
-    transform: none;
-  }
-}
+
 
 .pagination { display:flex;align-items:center;justify-content:flex-end;gap:16px;margin-top:18px;font-size:13px; }
 .record-detail { border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit;padding:0; }

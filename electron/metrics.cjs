@@ -58,17 +58,19 @@ function summarize(store, filter = {}) {
   const sessions = store.db.prepare("SELECT * FROM sessions").all(),
     sessionMap = new Map(sessions.map((s) => [s.id, s]));
   const accepts = (r) =>
+    (!filter.account || r.account === filter.account || store.db.prepare("SELECT 1 FROM usage WHERE turn=? AND session=? AND account=? LIMIT 1").get(r.id,r.session,filter.account)) &&
     (!filter.model || r.model === filter.model) &&
     (!filter.project ||
       sessionMap.get(r.session)?.project === filter.project) &&
     (!filter.session || r.session === filter.session);
   const conditions = ['u.ts>=?', 'u.ts<?'];
   const params = [start, end];
-  for (const [key, column] of [['model','u.model'], ['session','u.session'], ['project','s.project']]) {
+  for (const [key, column] of [['account','u.account'], ['model','u.model'], ['session','u.session'], ['project','s.project']]) {
     if (filter[key]) { conditions.push(`${column}=?`); params.push(filter[key]); }
   }
   const rows = analytics ? store.db.prepare(`SELECT u.* FROM usage u LEFT JOIN sessions s ON s.id=u.session WHERE ${conditions.join(' AND ')} ORDER BY u.ts`).all(...params) : [];
   const turnConditions=['t.started>=?','t.started<?'], turnParams=[start,end];
+  if(filter.account) {turnConditions.push('(t.account=? OR EXISTS (SELECT 1 FROM usage u WHERE u.turn=t.id AND u.session=t.session AND u.account=?))');turnParams.push(filter.account,filter.account);}
   if(filter.model) {turnConditions.push('(t.model=? OR EXISTS (SELECT 1 FROM usage u WHERE u.turn=t.id AND u.session=t.session AND u.model=?))');turnParams.push(filter.model,filter.model);}
   if(filter.session){turnConditions.push('t.session=?');turnParams.push(filter.session);}
   if(filter.project){turnConditions.push('s.project=?');turnParams.push(filter.project);}
@@ -138,13 +140,14 @@ function summarize(store, filter = {}) {
   const usageByTurn = new Map(), outputByTurn = new Map();
   if (analytics) {
     for (const r of store.db.prepare(`SELECT t.id, COALESCE(SUM(u.output),0) output FROM turns t
-      LEFT JOIN usage u ON u.turn=t.id AND u.session=t.session
-      WHERE t.started>=? AND t.started<? GROUP BY t.id`).iterate(start,end)) outputByTurn.set(r.id,r.output);
+      LEFT JOIN usage u ON u.turn=t.id AND u.session=t.session ${filter.account ? 'AND u.account=?' : ''}
+      WHERE t.started>=? AND t.started<? GROUP BY t.id`).iterate(...(filter.account ? [filter.account,start,end] : [start,end]))) outputByTurn.set(r.id,r.output);
   }
   if (selectedTurns.length) {
     const ids = selectedTurns.map(t=>t.id);
     for (const r of store.db.prepare(`SELECT u.* FROM usage u JOIN turns t ON t.id=u.turn AND t.session=u.session
       WHERE t.id IN (${ids.map(()=>'?').join(',')}) ORDER BY u.ts`).iterate(...ids)) {
+      if (filter.account && r.account !== filter.account) continue;
       if (!usageByTurn.has(r.turn)) usageByTurn.set(r.turn,[]);
       usageByTurn.get(r.turn).push(r);
     }
@@ -177,18 +180,21 @@ function summarize(store, filter = {}) {
     .prepare("SELECT * FROM turns WHERE status='running' AND last_seen>=?")
     .all(new Date(Date.now() - 120000).toISOString())
     .filter(accepts);
+  const quotaWhere = filter.account ? 'account=? AND ' : '';
+  const quotaParams = filter.account ? [filter.account] : [];
   const latest = store.db.prepare(`SELECT q.* FROM
-    (SELECT DISTINCT bucket,slot FROM quotas) b JOIN quotas q ON q.rowid=(
-      SELECT rowid FROM quotas WHERE bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)`).all();
+    (SELECT DISTINCT account,bucket,slot FROM quotas) b JOIN quotas q ON q.rowid=(
+      SELECT rowid FROM quotas WHERE account=b.account AND bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)
+    ${filter.account ? 'WHERE q.account=?' : ''}`).all(...quotaParams);
   const history = [];
   let historySamples = 0;
   if(historyWanted) {
-    const extent = store.db.prepare('SELECT MIN(ts) first,MAX(ts) last FROM quotas WHERE ts>=? AND ts<?').get(start,end);
+    const extent = store.db.prepare(`SELECT MIN(ts) first,MAX(ts) last FROM quotas WHERE ${quotaWhere}ts>=? AND ts<?`).get(...quotaParams,start,end);
     const width = Math.max(1,(Date.parse(extent.last)-Date.parse(extent.first))/150);
     const bins = new Map();
-    for(const q of store.db.prepare('SELECT * FROM quotas WHERE ts>=? AND ts<? ORDER BY ts').iterate(start,end)) {
+    for(const q of store.db.prepare(`SELECT * FROM quotas WHERE ${quotaWhere}ts>=? AND ts<? ORDER BY ts`).iterate(...quotaParams,start,end)) {
       historySamples++;
-      const key = `${q.bucket}:${q.slot}:${q.resets}:${Math.floor((Date.parse(q.ts)-Date.parse(extent.first))/width)}`;
+      const key = `${q.account}:${q.bucket}:${q.slot}:${q.resets}:${Math.floor((Date.parse(q.ts)-Date.parse(extent.first))/width)}`;
       let bin=bins.get(key);
       if(!bin) bins.set(key,bin={first:q,last:q,min:q,max:q});
       bin.last=q;
@@ -255,17 +261,19 @@ function summarize(store, filter = {}) {
     quotaHistorySamples: historySamples,
     quotaHistory: history,
     scan: store.get("scan"),
-    quotaStatus: store.get("quotaStatus"),
+    quotaStatus: !filter.account || store.get("quotaStatus")?.account === filter.account ? store.get("quotaStatus") : null,
+    currentAccount: store.get("currentAccount"),
+    accounts: store.db.prepare("SELECT * FROM accounts ORDER BY label,id").all(),
     coverage: store.db
-      .prepare("SELECT MIN(ts) first,MAX(ts) last,COUNT(*) records FROM usage")
-      .get(),
+      .prepare(`SELECT MIN(ts) first,MAX(ts) last,COUNT(*) records FROM usage ${filter.account ? "WHERE account=?" : ""}`)
+      .get(...quotaParams),
     options: {
       models: store.db
-        .prepare("SELECT DISTINCT model FROM usage ORDER BY model")
-        .all()
+        .prepare(`SELECT DISTINCT model FROM usage ${filter.account ? "WHERE account=?" : ""} ORDER BY model`)
+        .all(...quotaParams)
         .map((r) => r.model),
-      projects: [...new Set(sessions.map((s) => s.project))].sort(),
-      sessions: sessions.map((s) => ({ id: s.id, project: s.project })),
+      projects: [...new Set(sessions.filter(s => !filter.account || store.db.prepare("SELECT 1 FROM usage WHERE session=? AND account=? LIMIT 1").get(s.id,filter.account)).map((s) => s.project))].sort(),
+      sessions: sessions.filter(s => !filter.account || store.db.prepare("SELECT 1 FROM usage WHERE session=? AND account=? LIMIT 1").get(s.id,filter.account)).map((s) => ({ id: s.id, project: s.project })),
     },
     settings: store.settings(),
     prices,
@@ -287,6 +295,7 @@ function csv(rows) {
     "saved",
     "priceId",
     "kind",
+    "account",
   ];
   const cell = (value) => {
     let s = String(value ?? "");
@@ -311,6 +320,7 @@ function exportRows(store, filter) {
     .all(start, end)
     .filter(
       (r) =>
+        (!filter.account || r.account === filter.account) &&
         (!filter.model || r.model === filter.model) &&
         (!filter.project || r.project === filter.project) &&
         (!filter.session || r.session === filter.session),
