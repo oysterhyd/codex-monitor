@@ -328,7 +328,7 @@ input {
 select {
   max-width: 180px;
 }
-.filters > select:first-of-type {
+.filters > .account-control {
   margin-left: auto;
 }
 .date-inputs {
@@ -931,7 +931,7 @@ code {
   .panel-head > span {
     font-size: 12px;
   }
-  .filters > select:first-of-type {
+  .filters > .account-control {
     margin-left: 0;
   }
   h1 {

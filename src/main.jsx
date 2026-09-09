@@ -20,6 +20,8 @@ import {
   Stack,
   Target,
   FolderOpen,
+  UserCircle,
+  CaretDown,
 } from "@phosphor-icons/react";
 import "./style.css";
 import "./glass.css";
@@ -111,13 +113,14 @@ function Chart({
   step = false,
   label,
   replayKey,
+  range,
 }) {
   const [hover, setHover] = useState(null);
   useEffect(() => setHover(null), [replayKey]);
   if (!points.length) return <Empty />;
   const max = percent ? 100 : Math.max(1, ...points.map((p) => p[value] || 0));
-  const first = points[0].time,
-    last = points.at(-1).time;
+  const first = range?.start ? Date.parse(range.start) : points[0].time,
+    last = range?.end ? Date.parse(range.end) : points.at(-1).time;
   const xy = points.map((p, i) => [
     44 +
       (last > first
@@ -306,7 +309,7 @@ function Rank({ rows, type, onSelect }) {
 function App() {
   const [page, setPage] = useState("overview"),
     [data, setData] = useState(null),
-    [filter, setFilter] = useState({ range: "today" }),
+    [filter, setFilter] = useState({ range: "today", account: "current" }),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [toast, setToast] = useState(""),
@@ -375,7 +378,7 @@ function App() {
   const accountLabel = id => id === "unassigned" ? tr("未归属") : (data?.accounts?.find(a => a.id === id)?.label || tr("未归属"));
   const quotaId = q => `${q.account}:${q.bucket}:${q.slot}`;
   const primary =
-    quotas.find((q) => q.account === (filter.account || data?.currentAccount) && q.bucket === "codex" && q.slot === "primary") ||
+    quotas.find((q) => q.account === data?.quotaAccount && q.bucket === "codex" && q.slot === "primary") ||
     quotas[0];
   const selected =
     quotas.find((q) => quotaId(q) === quotaKey) || primary;
@@ -522,12 +525,19 @@ function App() {
                       />
                     </div>
                   )}
-                  <select aria-label={tr("账号筛选")} value={filter.account || ""}
-                    onChange={e => { setFilter(f => ({ range: f.range, start: f.start, end: f.end, account: e.target.value })); setQuotaKey(""); }}>
-                    <option value="">{tr("全部账号")}</option>
-                    {(data.accounts || []).map(a => <option key={a.id} value={a.id}>{a.label} · {a.id.slice(0, 6)}{a.id === data.currentAccount ? ` · ${tr("当前登录")}` : ""}</option>)}
-                    <option value="unassigned">{tr("未归属")}</option>
-                  </select>
+                  <div className="account-control">
+                    <UserCircle size={19} aria-hidden="true" />
+                    <select aria-label={tr("账号筛选")} value={filter.account || ""}
+                      onChange={e => { setFilter(f => ({ range: f.range, start: f.start, end: f.end, account: e.target.value })); setQuotaKey(""); }}>
+                      <option value="current">{tr("当前账号")} · {accountLabel(data.currentAccount)}</option>
+                      {page !== "quota" && <option value="">{tr("全部账号")}</option>}
+                      {page === "quota" && !filter.account && <option value="">{tr("当前账号")} · {accountLabel(data.currentAccount)}</option>}
+                      {(data.accounts || []).filter(a => a.id !== data.currentAccount).map(a => <option key={a.id} value={a.id}>{a.label} · {a.id.slice(0, 6)}</option>)}
+                      {filter.account === data.currentAccount && <option value={data.currentAccount}>{accountLabel(data.currentAccount)}</option>}
+                      <option value="unassigned">{tr("未归属")}</option>
+                    </select>
+                    <CaretDown size={14} aria-hidden="true" />
+                  </div>
                   {page !== "quota" && (
                     <>
                       <select
@@ -587,7 +597,7 @@ function App() {
                       format={(n) => (n == null ? "—" : n.toFixed(0) + "%")}
                       foot={
                         primary
-                          ? `${accountLabel(primary.account)} · ${tr("{0} 小时窗口", primary.minutes / 60)}`
+                          ? tr("{0} 小时窗口", primary.minutes / 60)
                           : tr("尚未获得额度快照")
                       }
                       onClick={() => setPage("quota")}
@@ -699,7 +709,7 @@ function App() {
                         {quotas.length ? (
                           quotas.slice(0, 4).map((q) => (
                             <div key={q.id}>
-                              <span className="bucket-label">{accountLabel(q.account)} · {q.bucket}</span>
+                              <span className="bucket-label">{q.bucket}</span>
                               <WindowQuota q={q} />
                             </div>
                           ))
@@ -896,7 +906,7 @@ function App() {
                               </tr>
                               {expanded===t.id && <tr className="record-expanded"><td colSpan={8}>
                                 <div>{tr("完整任务 ·")}{t.id}</div>
-                                <TaskAccount record={t} data={data} act={act} busy={busy} />
+                                <TaskAccount record={t} data={data} filter={filter} act={act} busy={busy} />
                                 <div className="model-details">{t.models?.map(m=><div key={m.model}>
                                   <strong>{m.model}</strong><span>{tr("输入 {0} · 缓存 {1} · 输出 {2}", full(m.input), full(m.cached), full(m.output))}</span>
                                   <span>{tr("输入 {0} · 输出 {1} · 合计 {2}", recordMoney(m.inputCost,m), recordMoney(m.outputCost,m), recordMoney(m.cost,m))}</span>
@@ -926,7 +936,7 @@ function App() {
                     {quotas.map((q) => (
                       <Panel
                         key={q.id}
-                        title={`${accountLabel(q.account)} · ${q.bucket}`}
+                        title={q.bucket}
                         meta={q.plan?.toUpperCase()}
                       >
                         <WindowQuota q={q} />
@@ -934,20 +944,17 @@ function App() {
                     ))}
                   </div>
                   <Panel title={tr("剩余额度历史")} meta={data.quotaHistorySamples>data.quotaHistory.length ? tr("已保留采样端点与峰谷") : undefined}>
-                    <select
-                      aria-label={tr("额度窗口")}
-                      value={
-                        selected ? quotaId(selected) : ""
-                      }
-                      onChange={(e) => setQuotaKey(e.target.value)}
-                    >
-                      {quotas.map((q) => (
-                        <option key={q.id} value={quotaId(q)}>
-                          {accountLabel(q.account)} · {q.bucket} · {q.minutes / 60}{tr("小时")}</option>
-                      ))}
-                    </select>
+                    <div className="segmented quota-window-selector" role="group" aria-label={tr("额度窗口")}
+                      style={{ "--active-index": Math.max(0, quotas.findIndex(q => quotaId(q) === quotaId(selected || {}))), "--segment-count": Math.max(1, quotas.length) }}>
+                      {quotas.length > 0 && <span className="range-lens" aria-hidden="true" />}
+                      {quotas.map(q => <button key={q.id} className={q.id === selected?.id ? "active" : ""}
+                        aria-pressed={q.id === selected?.id} onClick={() => setQuotaKey(quotaId(q))}>
+                        {q.bucket !== "codex" ? `${q.bucket} · ` : ""}{q.minutes >= 1440 ? tr("{0} 天窗口", q.minutes / 1440) : tr("{0} 小时窗口", q.minutes / 60)}
+                      </button>)}
+                    </div>
                     <Chart
                       points={quotaPoints}
+                      range={filter.range === "all" ? undefined : data.range}
                       replayKey={`${data.chartTransitionKey}:${selected?.account}:${selected?.bucket}:${selected?.slot}`}
                       value="remaining"
                       step
@@ -987,29 +994,26 @@ function App() {
   );
 }
 
-function TaskAccount({ record, data, act, busy }) {
-  const [account, setAccount] = useState("");
-  return <div className="button-row">
-    <select aria-label={tr("任务归属账号")} value={account} onChange={e => setAccount(e.target.value)}>
-      <option value="">{tr("选择账号")}</option>
-      {(data.accounts || []).map(a => <option key={a.id} value={a.id}>{a.label} · {a.id.slice(0,6)}</option>)}
-    </select>
-    <button className="button" disabled={busy || !account} onClick={() => act(() => api.assignAccount({account,turn:record.id,session:record.session,range:"all"}), tr("账号归属已更新"))}>{tr("归属此任务")}</button>
-  </div>;
+function attributionAccount(data, filter) {
+  const id = filter.account === "current" ? data.currentAccount : filter.account;
+  return data.accounts?.find(a => a.id === id);
+}
+function TaskAccount({ record, data, filter, act, busy }) {
+  const account = attributionAccount(data, filter);
+  return account ? <button className="button" disabled={busy}
+    onClick={() => act(() => api.assignAccount({account:account.id,turn:record.id,session:record.session,range:"all"}), tr("账号归属已更新"))}>
+    {tr("归属至 {0}", account.label)}
+  </button> : null;
 }
 function AccountAssignment({ data, filter, act, busy }) {
-  const [account, setAccount] = useState("");
-  return <Panel title={tr("历史账号归属")}>
-    <p>{tr("缺少账号信息的旧记录保留为未归属。确认日期范围后，可将该范围内全部未归属用量、任务和额度记录指定给一个账号。")}</p>
-    <div className="button-row">
-      <select aria-label={tr("归属账号")} value={account} onChange={e => setAccount(e.target.value)}>
-        <option value="">{tr("选择账号")}</option>
-        {(data.accounts || []).map(a => <option key={a.id} value={a.id}>{a.label} · {a.id.slice(0, 6)}</option>)}
-      </select>
-      <button className="button" disabled={busy || !account} onClick={() => act(() => api.assignAccount({ range: filter.range, start: filter.start, end: filter.end, account }), tr("账号归属已更新"))}>{tr("指定未归属记录")}</button>
-      <span className="muted">{tr("可在设置中添加历史账号；此操作不受模型、项目筛选影响。")}</span>
-    </div>
-  </Panel>;
+  const account = attributionAccount(data, filter);
+  return account ? <div className="attribution-toolbar">
+    <span>{tr("历史记录归属")}</span>
+    <button className="text-button" disabled={busy} title={tr("缺少账号信息的旧记录保留为未归属。确认日期范围后，可将该范围内全部未归属用量、任务和额度记录指定给一个账号。")}
+      onClick={() => act(() => api.assignAccount({ range: filter.range, start: filter.start, end: filter.end, account: account.id }), tr("账号归属已更新"))}>
+      {tr("将未归属记录归入 {0}", account.label)}
+    </button>
+  </div> : null;
 }
 function AccountManager({ data, act, busy }) {
   const [label, setLabel] = useState("");

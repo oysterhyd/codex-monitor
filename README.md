@@ -4,11 +4,15 @@ Windows desktop application for monitoring local Codex usage, account quotas, to
 
 ## Download
 
-[Download v1.0.1 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v1.0.1)
+[Download v1.0.2 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v1.0.2)
 
-Run `Codex-Monitor-Setup-1.0.1.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
+Run `Codex-Monitor-Setup-1.0.2.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
 
 The installer is unsigned. Automatic updates and cross-device synchronization are not included.
+
+## 1.0.2
+
+账号切换统一在顶部筛选栏；默认显示当前账号，额度不再混合多个账号。额度窗口采用玻璃分段按钮，历史曲线横轴遵循所选日期范围。
 
 ## 1.0.1
 
@@ -26,10 +30,10 @@ The installer is unsigned. Automatic updates and cross-device synchronization ar
 
 ## 多账号使用
 
-1. 顶部筛选区选择「全部账号」、某个账号或「未归属」，总览、历史、额度和 CSV 导出同步筛选。
+1. 顶部筛选区默认选择「当前账号」，也可手动选择历史账号或「未归属」。总览、历史可选择「全部账号」汇总用量；额度始终只显示一个账号，汇总模式下显示当前登录账号。
 2. 在「设置与价格 → 账号管理」添加历史账号或修改名称。
-3. 旧记录缺少账号信息时不会自动归入当前账号。在「历史分析」确认日期范围，再选择账号并点击「指定未归属记录」。此批量操作覆盖该时间范围的未归属用量、任务与额度，不受模型、项目筛选影响。
-4. 同一天使用多个账号时，可展开「任务运行记录」，选择账号并点击「归属此任务」。它只更改该任务的用量与任务记录，不修改额度快照。
+3. 旧记录缺少账号信息时不会自动归入当前账号。在「历史分析」确认日期范围，在顶部选择目标账号并点击「将未归属记录归入…」。此批量操作覆盖该时间范围的未归属用量、任务与额度，不受模型、项目筛选影响。
+4. 同一天使用多个账号时，可展开「任务运行记录」，使用顶部所选账号并点击「归属至…」。它只更改该任务的用量与任务记录，不修改额度快照。
 5. 旧账号可查看保留的记录；在线额度查询只使用当前 Codex 登录账号，不会自动登录其他账号。
 
 ## Account attribution boundaries

@@ -47,6 +47,7 @@ function bucketOf(ts, hourly) {
   );
 }
 function summarize(store, filter = {}) {
+  if (filter.account === "current") filter = {...filter, account: store.get("currentAccount") || "unassigned"};
   const { start, end } = bounds(filter);
   const page = filter.page || 'all';
   const analytics = ['all', 'overview', 'history'].includes(page);
@@ -180,12 +181,14 @@ function summarize(store, filter = {}) {
     .prepare("SELECT * FROM turns WHERE status='running' AND last_seen>=?")
     .all(new Date(Date.now() - 120000).toISOString())
     .filter(accepts);
-  const quotaWhere = filter.account ? 'account=? AND ' : '';
-  const quotaParams = filter.account ? [filter.account] : [];
+  const quotaAccount = filter.account || store.get('currentAccount') || 'unassigned';
+  const quotaWhere = 'account=? AND ';
+  const quotaParams = [quotaAccount];
+  const analyticsAccountParams = filter.account ? [filter.account] : [];
   const latest = store.db.prepare(`SELECT q.* FROM
     (SELECT DISTINCT account,bucket,slot FROM quotas) b JOIN quotas q ON q.rowid=(
       SELECT rowid FROM quotas WHERE account=b.account AND bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)
-    ${filter.account ? 'WHERE q.account=?' : ''}`).all(...quotaParams);
+    WHERE q.account=?`).all(...quotaParams);
   const history = [];
   let historySamples = 0;
   if(historyWanted) {
@@ -260,17 +263,18 @@ function summarize(store, filter = {}) {
     records: { page: recordPage, pageSize, total: turns.length, pages: Math.max(1,Math.ceil(turns.length/pageSize)) },
     quotaHistorySamples: historySamples,
     quotaHistory: history,
+    quotaAccount,
     scan: store.get("scan"),
-    quotaStatus: !filter.account || store.get("quotaStatus")?.account === filter.account ? store.get("quotaStatus") : null,
+    quotaStatus: store.get("quotaStatus")?.account === quotaAccount ? store.get("quotaStatus") : null,
     currentAccount: store.get("currentAccount"),
     accounts: store.db.prepare("SELECT * FROM accounts ORDER BY label,id").all(),
     coverage: store.db
       .prepare(`SELECT MIN(ts) first,MAX(ts) last,COUNT(*) records FROM usage ${filter.account ? "WHERE account=?" : ""}`)
-      .get(...quotaParams),
+      .get(...analyticsAccountParams),
     options: {
       models: store.db
         .prepare(`SELECT DISTINCT model FROM usage ${filter.account ? "WHERE account=?" : ""} ORDER BY model`)
-        .all(...quotaParams)
+        .all(...analyticsAccountParams)
         .map((r) => r.model),
       projects: [...new Set(sessions.filter(s => !filter.account || store.db.prepare("SELECT 1 FROM usage WHERE session=? AND account=? LIMIT 1").get(s.id,filter.account)).map((s) => s.project))].sort(),
       sessions: sessions.filter(s => !filter.account || store.db.prepare("SELECT 1 FROM usage WHERE session=? AND account=? LIMIT 1").get(s.id,filter.account)).map((s) => ({ id: s.id, project: s.project })),
@@ -311,6 +315,7 @@ function csv(rows) {
   );
 }
 function exportRows(store, filter) {
+  if (filter.account === "current") filter = {...filter, account: store.get("currentAccount") || "unassigned"};
   const { start, end } = bounds(filter),
     prices = store.prices();
   return store.db

@@ -224,5 +224,9 @@
   "账号不存在": "Account does not exist",
   "将此任务的全部用量记录归属到所选账号？此操作不修改额度快照。": "Assign all usage records of this task to the selected account? Quota snapshots will not be changed.",
   "任务归属账号": "Task account",
-  "归属此任务": "Assign this task"
+  "归属此任务": "Assign this task",
+  "当前账号": "Current account",
+  "历史记录归属": "Historical attribution",
+  "归属至 {0}": "Assign to {0}",
+  "将未归属记录归入 {0}": "Assign unassigned records to {0}"
 }
