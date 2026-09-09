@@ -765,8 +765,20 @@ tbody tr:hover {
   grid-template-columns: 1fr 1fr;
   gap: 20px;
 }
+.settings-content {
+  max-width: none;
+}
 .settings-layout {
-  max-width: 1050px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.settings-layout > .panel {
+  min-width: 0;
+  margin-bottom: 0;
+}
+.settings-wide {
+  grid-column: 1 / -1;
 }
 .setting-row {
   display: flex;
@@ -824,6 +836,7 @@ code {
   margin-bottom: 15px;
 }
 .price-form label {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -835,6 +848,7 @@ code {
 }
 .price-form input {
   width: 100%;
+  min-width: 0;
 }
 .settings-layout table {
   margin-top: 18px;
@@ -861,6 +875,19 @@ code {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+@media (min-width: 1500px) {
+  .price-form {
+    grid-template-columns: minmax(180px, 1.6fr) repeat(4, minmax(90px, 1fr)) minmax(210px, 1.5fr);
+  }
+  .price-form label:last-child {
+    grid-column: auto;
+  }
+}
+@media (max-width: 1250px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (max-width: 1150px) {

@@ -24,6 +24,7 @@ import {
 } from "@phosphor-icons/react";
 import "./style.css";
 import { createRefresh } from "./refresh.mjs";
+import { chartPaths } from "./chart-paths.mjs";
 
 const api = window.monitor;
 const compact = (n) =>
@@ -106,6 +107,7 @@ function Chart({
   value = "total",
   color = "var(--accent)",
   percent = false,
+  step = false,
   label,
 }) {
   const [hover, setHover] = useState(null);
@@ -121,7 +123,7 @@ function Chart({
         836,
     150 - ((p[value] || 0) / max) * 128,
   ]);
-  const line = xy.map(([x, y], i) => `${i ? "L" : "M"}${x},${y}`).join(" ");
+  const { line, area } = chartPaths(points, xy, { step });
   const chosen = hover == null ? null : points[hover];
   return (
     <div className="chart-wrap">
@@ -147,7 +149,7 @@ function Chart({
           </g>
         ))}
         <path
-          d={`${line} L${xy.at(-1)[0]},150 L44,150 Z`}
+          d={area}
           fill={color}
           opacity=".08"
         />
@@ -164,7 +166,7 @@ function Chart({
             <circle
               cx={x}
               cy={y}
-              r={hover === i ? 5 : points.length < 30 ? 2.5 : 0}
+              r={hover === i ? 5 : points.length < 30 ? 2.5 : step ? 1.5 : 0}
               fill={color}
             />
           </g>
@@ -377,6 +379,7 @@ function App() {
           name: date(q.ts),
           time: Date.parse(q.ts),
           remaining: 100 - q.used,
+          resets: q.resets,
         }))
     : [];
   return (
@@ -452,7 +455,7 @@ function App() {
             </button>
           </div>
         </header>
-        <div className="content">
+        <div className={`content${page === "settings" ? " settings-content" : ""}`}>
           <div className="page-title">
             <div>
               <div className="eyebrow">
@@ -983,6 +986,7 @@ function App() {
                     <Chart
                       points={quotaPoints}
                       value="remaining"
+                      step
                       percent
                       label="剩余额度历史曲线"
                     />
@@ -1145,7 +1149,7 @@ function Settings({ data, act, busy }) {
           </button>
         </div>
       </Panel>
-      <Panel title="模型价格" meta="USD / 百万 tokens">
+      <Panel title="模型价格" meta="USD / 百万 tokens" className="settings-wide">
         <div className="notice">
           按 API 标准价估算，不代表订阅账单。
         </div>
@@ -1268,7 +1272,7 @@ function Settings({ data, act, busy }) {
           </table>
         </div>
       </Panel>
-      <Panel title="历史管理">
+      <Panel title="历史管理" className="settings-wide">
         <div className="setting-row">
           <div>
             <b>清空监测历史</b>
