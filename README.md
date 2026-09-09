@@ -1,118 +1,60 @@
 # Codex Monitor
 
-Windows desktop application for monitoring local Codex usage, account quotas, token costs, and task performance. Supports 简体中文 and English.
+Windows desktop application for monitoring local Codex usage, account quotas, token costs, and task performance. Supports 简体中文 and English, and ships a liquid-glass style desktop widget.
 
 ## Download
 
-[Download v2.0.3 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.0.3)
+[Download for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/latest)
 
-Run `Codex-Monitor-Setup-2.0.3.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
+Run the `Codex-Monitor-Setup-*.exe` installer. It installs per-user (no admin rights) and can upgrade an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
 
 The installer is unsigned. Automatic updates and cross-device synchronization are not included.
 
-## 2.0.3 - Aligned TPS sparkline, topmost widget and taskbar presence / 折线对齐、默认置顶与任务栏常驻
-
-- Thicken the widget TPS sparkline to match the metric bars (3.5px) and align its baseline with them.
-- The desktop widget now floats above other windows by default; unpin any time from the widget menu.
-- Keep a taskbar icon in widget mode: the card owns the slot, so clicking it summons the widget; switching back hands the slot to the main window.
-
-## 2.0.2 — Manual widget mode switch / 手动小组件模式开关
-
-- Replace the automatic minimize/restore triggers with a manual glass switch in the top bar; the tray menu item is now a checkbox as well. Close-to-tray no longer forces the widget on.
-- Widget mode persists across restarts: relaunching shows only the desktop card until you switch back.
-- Smooth transitions: the main window fades and scales down when entering widget mode, the glass card springs in and fades out on switch, respecting reduced-motion preferences.
-- The desktop widget keeps drag, pin, refresh and restore controls; layout and monitoring data are unchanged.
-
-## 2.0.1 — Compact widget and updated app icon
-
-- Reduce the desktop widget from 720 × 520 to approximately 360 × 260 logical pixels (one quarter of the area, subject to Windows DPI minimum size).
-- Remove the small captions beneath all four metric cards. Quota freshness and TPS definitions remain available on hover.
-- Update the Windows executable, tray, notification and installer icons to the current glass artwork, with multiple ICO resolutions.
-- Preserve existing widget controls, position, quota data and monitoring.
-
-## 2.0.0 — Desktop widget / 桌面小组件
-
-Minimize or close the main window to keep a glass desktop widget visible. Drag its header to move it; double-click the header or click the app icon to return. The options menu supports always-on-top, refresh, and hide. Position and pin state persist locally.
-
-- Reference-inspired translucent glass, continuous rounded corners, four metric cards and a 24-hour token chart. This is a Windows/CSS approximation, not Apple's native Liquid Glass material.
-- Current-account remaining 5h and weekly quota; expired values wait for a fresh sample and offline snapshots are marked stale.
-- Live TPS uses output tokens recorded in the last 60 seconds divided by 60, refreshed every 3 seconds. It includes idle time and is not exact generation throughput.
-- Current-account daily tokens, yesterday comparison, token-weighted cache hit rate, and rolling 24-hour usage. No cross-account quota totals.
-- Restricted widget bridge, hidden-window polling pause, background collection, Chinese/English, and failure/loading states.
-- Preserves the existing account observation continuity and account selector simplification. Manual record assignment controls are no longer shown in History.
-
-Validation: 42 unit checks plus main-window and installed-widget smoke checks, including minimize/restore, ongoing collection, expired quotas, disconnected state, and visual layout. Test fixtures and private usage screenshots are excluded from this repository.
-
-## 1.0.6
-
-内置 GPT-5.5（输入 / 缓存输入 / 输出：$5 / $0.50 / $30）和 GPT-5.4（$2.50 / $0.25 / $15）的标准短上下文价格，单位为美元 / 百万 tokens。升级自动补齐缺失价格，保留已有手动设置；历史记录按此基准估算。
-
-## 1.0.5
-
-额度历史采用经过采样点且不超出端点数值的柔和曲线，重置以细虚线区分，长采样缺口保留留白。增加等间距日期刻度及整张图表的淡入过渡，减少密集圆点。账号归属数据保持不变。
-
-## 1.0.4
-
-用量默认显示全部账号记录，避免历史趋势被新账号观察范围截断；日期轴跟随已加载的数据范围。修正额度重置时间 1 秒舍入差异造成的断线，并修复数据库索引异常导致写回失败、后台退出的问题。
-
-## 1.0.3
-
-优化账号筛选的重复数据库查询与额度快照查询，保持界面、动画和归属规则不变。合成数据基准（3 万条用量、500 个会话）总览约 740 → 85 ms，额度页约 750 → 7 ms；实际速度取决于数据量及设备。
-
-## 1.0.2
-
-账号切换统一在顶部筛选栏；默认显示当前账号，额度不再混合多个账号。额度窗口采用玻璃分段按钮，历史曲线横轴遵循所选日期范围。
-
-## 1.0.1
-
-修正筛选栏布局：时间按钮保持左侧原位，账号筛选位于右侧模型筛选之前；保留原有滑动动画。
-
-## 1.0.0
-
-- View usage, estimated costs, task records, runtime metrics, quota history, and CSV exports by account.
-- Add historical accounts and edit their display names in **Settings → Account management**.
-- Assign unassigned records by date range in **History**. Expand a task record to assign or correct that task individually; task assignment does not change quota snapshots.
-- Account-specific quota snapshots remain separate, including identically named quota windows.
-- Centered glass navigation, rounded panels, animated charts and date-range controls.
-- Persistent Chinese/English language selection, including tray menus and confirmation dialogs.
-- Existing statistics, pricing, and settings migrate on upgrade.
-
-## 多账号使用
-
-1. 用量顶部筛选区默认选择「全部账号」，也可手动选择历史账号或「未归属」。总览、历史可选择「全部账号」汇总用量；额度始终只显示一个账号，汇总模式下显示当前登录账号。
-2. 在「设置与价格 → 账号管理」添加历史账号或修改名称。
-3. 旧记录缺少账号信息时不会自动归入当前账号。在「历史分析」确认日期范围，在顶部选择目标账号并点击「将未归属记录归入…」。此批量操作覆盖该时间范围的未归属用量、任务与额度，不受模型、项目筛选影响。
-4. 同一天使用多个账号时，可展开「任务运行记录」，使用顶部所选账号并点击「归属至…」。它只更改该任务的用量与任务记录，不修改额度快照。
-5. 旧账号可查看保留的记录；在线额度查询只使用当前 Codex 登录账号，不会自动登录其他账号。
-
-## Account attribution boundaries
-
-Codex statistical logs generally do not contain an account identifier. Pre-upgrade records remain **Unassigned** until you assign them; they are not assumed to belong to the current login.
-
-While monitoring is running, account attribution uses sampled local sign-in state and record timestamps. Gaps during account changes, application shutdown, or pauses longer than 15 seconds remain unassigned. A very brief switch away and back between observations may not be detected; task attribution can be corrected manually. A shared task spanning accounts shows only the selected account’s usage contributions, while task duration remains the duration recorded for the whole task.
-
-Account identity combines the selected account and login user into a SHA-256 identifier. The database stores only that identifier and a display name. It does not store passwords, authentication tokens, or API keys. Original Codex logs are not modified.
-
 ## Features
 
-- Overview: remaining quota, tokens, API-equivalent estimated cost, cache hit rate, model distribution, and output speed.
-- History: model/project/task breakdown, paginated task records, per-model cost details, and account attribution.
-- Quota: latest window snapshots and step charts that preserve reset boundaries and sampling gaps.
-- Settings: language, theme, launch at sign-in, quota alert muting, query interval, data locations, model price versions, and account names.
-- Incremental background collection with worker recovery and database corruption backup/recovery.
-- CSV export of the current filters, including the account identifier. Formula-like CSV values are escaped.
+### Overview
+Today's tokens with a yesterday comparison, API-equivalent estimated cost, cache hit rate, remaining quota, model distribution, and output speed. Time ranges: today / last 7 days / last 30 days / all / custom, filterable by model, project, task, and account, with smooth value transitions.
 
-## Measurement and privacy
+### History
+Usage breakdowns by model, project, and task; paginated task records with per-model token and cost details on expansion. Unassigned records can be assigned by date range or per task; export the current filters as CSV (formula-like values are escaped).
 
-API-equivalent cost is an estimate, not a subscription bill. Included price defaults use Standard short-context rates verified on 2026-09-09; long-context, Fast, regional adjustments, and later price changes may require manual pricing versions. Unknown model prices remain unpriced.
+### Quota
+Current-account 5h and weekly quota windows: remaining percentage, reset time, update time, and a step-chart history that preserves real sample boundaries and stays broken across resets.
 
-Quota snapshots may include activity on other devices. Token statistics cover locally available Codex Desktop statistical records. CLI-origin sessions are excluded. Task output rates include tool and wait time; generation-only speed is not available from these logs.
+### Settings
+Instant Chinese/English switching, system-following light/dark theme, launch at sign-in, quota alerts and query interval, data locations, model price versions (manual edits always add a new version), and account management.
 
-Only statistical records are parsed into the monitoring database; message and tool bodies are not stored. Online quota queries use the existing local Codex App Server authentication. Data stays on the local computer. Database recovery preserves readable settings, pricing, account metadata, and manual usage attribution; corrupt historical samples may be unavailable. Backups are retained in the data directory.
+### Desktop widget
+- A top-bar switch toggles between the main window and the glass desktop card; the tray menu offers the same checkbox.
+- The card shows 5h / weekly remaining quota, live TPS, cache hit rate, today's tokens, and a 24-hour usage trend.
+- Pinned above other windows by default; unpin from the card menu at any time.
+- In widget mode the card owns the taskbar slot, so the taskbar always offers an entry point; clicking it summons the widget.
+- Drag to move, double-click the header to return. Mode, position, and pin state persist locally across restarts.
+- Smooth enter/exit transitions respect the system reduced-motion setting. The translucent glass look is a Windows/CSS approximation, not Apple's native material.
+
+### Tray and background
+Closing the window keeps incremental collection running in the tray with open / refresh / mute / quit actions. Windows notifications fire at 20% and 10% remaining quota (once per cycle and threshold); launch at sign-in is optional and starts silently.
+
+## How it works
+
+- Read-only scanning of `%CODEX_HOME%` (default `%USERPROFILE%\.codex`) `sessions/` and `archived_sessions/`. Only `originator === "Codex Desktop"` records are counted (including desktop subagents); CLI and IDE-extension sessions are excluded.
+- New-format usage records are deduplicated by `response_id`; legacy `token_count` snapshots use cumulative differencing.
+- Quotas are read through the local Codex app-server (`account/rateLimits/read`) — no model requests are created and no Codex files are modified.
+- Recent files are scanned every 3 seconds and all directories re-checked every 60 seconds; the quota query interval is configurable between 60–300 seconds.
+- Statistics live in `%APPDATA%\codex-monitor\monitor.sqlite`, managed by a background worker with automatic recovery; a corrupt database is backed up and rebuilt while readable settings and prices are kept.
+
+## Metrics and privacy
+
+- Quota belongs to the currently signed-in account and may include usage from other devices. Token statistics cover locally available Codex Desktop records only.
+- Cache hit rate = cached input tokens ÷ input tokens (token-weighted); no fake 0% is shown when there is no input.
+- API-equivalent cost is an estimate using Standard short-context API rates — not a subscription bill. Fast, long-context, and regional adjustments are not recognized; default prices ship for major models, other models can be priced manually as new versions.
+- Live TPS divides output tokens recorded in the last 60 seconds by 60, including idle time; it is not exact generation throughput. History shows the per-task average output rate.
+- Only statistical records are parsed; message and tool bodies are never stored. Credentials stay local. Accounts are identified by a SHA-256 digest of the login user and account pair — no passwords, tokens, or API keys are saved.
+- All data stays on the local computer. No telemetry, no sync. Clearing history keeps prices and settings.
 
 ## Build from source
 
-Requires Windows, Node.js with `node:sqlite` support, npm, and a local Codex installation for live data.
+Requires Windows, Node.js 22.19+ with `node:sqlite` support, npm, and a local Codex installation for live data.
 
 ```powershell
 npm ci
@@ -121,8 +63,13 @@ npm start
 npm run package
 ```
 
-Built installers are written to `release/`. Browser-only development (`npm run dev`) previews the shell without connecting to local account data. The public repository contains the application source; local integration fixtures, account data, screenshots, and credentials are excluded.
+Built installers are written to `release/`. Browser-only development (`npm run dev`) previews the shell without connecting to local account data.
 
 ## Stack
 
-Electron 44, React 19, Vite 8, SQLite, and Phosphor icons.
+Electron 44 · React 19 · Vite 8 · SQLite (node:sqlite) · Phosphor Icons
+
+## Reference
+
+- [Codex App Server protocol](https://learn.chatgpt.com/docs/app-server)
+- [OpenAI API pricing](https://developers.openai.com/api/docs/pricing)
