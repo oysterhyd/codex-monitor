@@ -474,12 +474,6 @@ function App() {
             <>
               {page !== "settings" && (
                 <div className="filters">
-                  <select aria-label={tr("账号筛选")} value={filter.account || ""}
-                    onChange={e => { setFilter(f => ({ range: f.range, start: f.start, end: f.end, account: e.target.value })); setQuotaKey(""); }}>
-                    <option value="">{tr("全部账号")}</option>
-                    {(data.accounts || []).map(a => <option key={a.id} value={a.id}>{a.label} · {a.id.slice(0, 6)}{a.id === data.currentAccount ? ` · ${tr("当前登录")}` : ""}</option>)}
-                    <option value="unassigned">{tr("未归属")}</option>
-                  </select>
                   <div className="segmented range-selector" role="group" aria-label={tr("时间范围")}
                     style={{ "--active-index": ["today", "7d", "30d", "all", "custom"].indexOf(filter.range) }}>
                     <span className="range-lens" aria-hidden="true" />
@@ -528,6 +522,12 @@ function App() {
                       />
                     </div>
                   )}
+                  <select aria-label={tr("账号筛选")} value={filter.account || ""}
+                    onChange={e => { setFilter(f => ({ range: f.range, start: f.start, end: f.end, account: e.target.value })); setQuotaKey(""); }}>
+                    <option value="">{tr("全部账号")}</option>
+                    {(data.accounts || []).map(a => <option key={a.id} value={a.id}>{a.label} · {a.id.slice(0, 6)}{a.id === data.currentAccount ? ` · ${tr("当前登录")}` : ""}</option>)}
+                    <option value="unassigned">{tr("未归属")}</option>
+                  </select>
                   {page !== "quota" && (
                     <>
                       <select
