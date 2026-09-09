@@ -4,11 +4,15 @@ Windows desktop application for monitoring local Codex usage, account quotas, to
 
 ## Download
 
-[Download v1.0.4 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v1.0.4)
+[Download v1.0.5 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v1.0.5)
 
-Run `Codex-Monitor-Setup-1.0.4.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
+Run `Codex-Monitor-Setup-1.0.5.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
 
 The installer is unsigned. Automatic updates and cross-device synchronization are not included.
+
+## 1.0.5
+
+额度历史采用经过采样点且不超出端点数值的柔和曲线，重置以细虚线区分，长采样缺口保留留白。增加等间距日期刻度及整张图表的淡入过渡，减少密集圆点。账号归属数据保持不变。
 
 ## 1.0.4
 

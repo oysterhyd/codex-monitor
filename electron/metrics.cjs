@@ -199,9 +199,20 @@ function summarize(store, filter = {}) {
   if(historyWanted) {
     const extent = store.db.prepare(`SELECT MIN(ts) first,MAX(ts) last FROM quotas WHERE ${quotaWhere}ts>=? AND ts<?`).get(...quotaParams,start,end);
     const width = Math.max(1,(Date.parse(extent.last)-Date.parse(extent.first))/150);
-    const bins = new Map();
+    const bins = new Map(), previousByWindow = new Map(), gapEdges = new Map();
+
     for(const q of store.db.prepare(`SELECT * FROM quotas WHERE ${quotaWhere}ts>=? AND ts<? ORDER BY ts`).iterate(...quotaParams,start,end)) {
       historySamples++;
+      const windowKey = `${q.account}:${q.bucket}:${q.slot}`;
+      const previous = previousByWindow.get(windowKey);
+      // Sparse log samples within a quota window can still show a sampled trend.
+      // Leave a gap only when an entire window (capped at six hours) is unobserved.
+      const maxGap = Math.max(60, Math.min(q.minutes || 300, 360)) * 60000;
+      if (previous && Date.parse(q.ts) - Date.parse(previous.ts) > maxGap) {
+        q.gapBefore = true;
+        gapEdges.set(previous.id, previous); gapEdges.set(q.id, q);
+      }
+      previousByWindow.set(windowKey, q);
       const key = `${q.account}:${q.bucket}:${q.slot}:${q.resets}:${Math.floor((Date.parse(q.ts)-Date.parse(extent.first))/width)}`;
       let bin=bins.get(key);
       if(!bin) bins.set(key,bin={first:q,last:q,min:q,max:q});
@@ -209,7 +220,7 @@ function summarize(store, filter = {}) {
       if(q.used<bin.min.used)bin.min=q;
       if(q.used>bin.max.used)bin.max=q;
     }
-    const points=new Map();
+    const points=new Map(gapEdges);
     for(const bin of bins.values()) for(const q of Object.values(bin)) points.set(q.id,q);
     history.push(...[...points.values()].sort((a,b)=>a.ts.localeCompare(b.ts)));
   }

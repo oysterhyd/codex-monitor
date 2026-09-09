@@ -228,5 +228,7 @@
   "当前账号": "Current account",
   "历史记录归属": "Historical attribution",
   "归属至 {0}": "Assign to {0}",
-  "将未归属记录归入 {0}": "Assign unassigned records to {0}"
+  "将未归属记录归入 {0}": "Assign unassigned records to {0}",
+  "额度重置或窗口调整": "Quota reset or window adjustment",
+  "实线为采样趋势，虚线为重置，留白为采样缺口": "Solid: sampled trend · Dashed: reset · Blank: sampling gap"
 }

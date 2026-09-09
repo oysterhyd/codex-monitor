@@ -105,3 +105,7 @@ button:active:not(:disabled) { transform: scale(.97); }
 .attribution-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: -8px 0 18px; font-size: 12px; color: var(--muted); }
 .attribution-toolbar .text-button { color: var(--accent); padding: 6px 0; text-align: left; }
 @media (max-width: 600px) { .filters > .account-control { flex: 1 1 100%; margin-left: 0; } .quota-window-selector button { white-space: normal; } }
+
+.chart-scene { animation: chart-scene-enter 360ms ease-out both; }
+@keyframes chart-scene-enter { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 600px) { .chart-minor-tick { display: none; } }

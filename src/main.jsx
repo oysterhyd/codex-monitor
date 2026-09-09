@@ -129,11 +129,13 @@ function Chart({
         836,
     150 - ((p[value] || 0) / max) * 128,
   ]);
-  const { line, area } = chartPaths(points, xy, { step });
+  const { line, area, connectors = [] } = chartPaths(points, xy, { step, smooth: step });
   const chosen = hover == null ? null : points[hover];
   return (
     <div className="chart-wrap">
       <svg
+        key={replayKey}
+        className="chart-scene"
         viewBox="0 0 920 190"
         role="img"
         aria-label={label || tr("用量趋势")}
@@ -154,6 +156,7 @@ function Chart({
             </text>
           </g>
         ))}
+        {(last > first ? [0, 1/6, 2/6, 3/6, 4/6, 5/6, 1] : [0]).map((f,i) => <line key={f} className={i % 2 ? "chart-minor-tick" : ""} x1={44+f*836} x2={44+f*836} y1="22" y2="150" stroke="var(--border)" opacity=".35" />)}
         <g key={replayKey} className="chart-reveal">
         <path
           d={area}
@@ -167,21 +170,22 @@ function Chart({
           strokeWidth="2.5"
           strokeLinejoin="round"
         />
+        {connectors.map((d,i) => <path key={i} d={d} fill="none" stroke={color} strokeWidth="1.2" strokeDasharray="3 5" opacity=".45"><title>{tr("额度重置或窗口调整")}</title></path>)}
         {xy.map(([x, y], i) => (
           <g key={i} onMouseEnter={() => setHover(i)}>
             <rect x={x - 8} y="12" width="16" height="144" fill="transparent" />
             <circle
               cx={x}
               cy={y}
-              r={hover === i ? 5 : points.length < 30 ? 2.5 : step ? 1.5 : 0}
+              r={hover === i ? 5 : points.length < 15 ? 2.5 : 0}
               fill={color}
             />
           </g>
         ))}
         </g>
-        {(last > first ? [0, 0.5, 1] : [0]).map((fraction) => (
+        {(last > first ? [0, 1/6, 2/6, 3/6, 4/6, 5/6, 1] : [0]).map((fraction, index) => (
             <text
-              className="chart-tick"
+              className={`chart-tick ${index % 2 ? "chart-minor-tick" : ""}`}
               key={fraction}
               x={44 + fraction * 836}
               y="179"
@@ -191,7 +195,7 @@ function Chart({
               fill="var(--muted)"
               fontSize="16"
             >
-              {date(first + fraction * (last - first))}
+              {new Date(first + fraction * (last - first)).toLocaleString(dateLocale(), last-first > 2*86400000 ? {month:"2-digit",day:"2-digit"} : {hour:"2-digit",minute:"2-digit",hour12:false})}
             </text>
           ))}
       </svg>
@@ -390,6 +394,7 @@ function App() {
           time: Date.parse(q.ts),
           remaining: 100 - q.used,
           resets: q.resets,
+          gapBefore: q.gapBefore,
         }))
     : [];
   return (
@@ -943,7 +948,7 @@ function App() {
                       </Panel>
                     ))}
                   </div>
-                  <Panel title={tr("剩余额度历史")} meta={data.quotaHistorySamples>data.quotaHistory.length ? tr("已保留采样端点与峰谷") : undefined}>
+                  <Panel title={tr("剩余额度历史")} meta={data.quotaHistorySamples>data.quotaHistory.length ? tr("实线为采样趋势，虚线为重置，留白为采样缺口") : undefined}>
                     <div className="segmented quota-window-selector" role="group" aria-label={tr("额度窗口")}
                       style={{ "--active-index": Math.max(0, quotas.findIndex(q => quotaId(q) === quotaId(selected || {}))), "--segment-count": Math.max(1, quotas.length) }}>
                       {quotas.length > 0 && <span className="range-lens" aria-hidden="true" />}
