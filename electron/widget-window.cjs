@@ -15,7 +15,7 @@ function createWidget({ data, restore, refresh }) {
   };
   const window = new BrowserWindow({ ...position(), width, height, frame: false, transparent: true,
     backgroundColor: '#00000000', hasShadow: false, resizable: false, maximizable: false, fullscreenable: false,
-    skipTaskbar: true, show: false, alwaysOnTop: saved.pinned === true, title: 'Codex Monitor Widget',
+    skipTaskbar: true, show: false, alwaysOnTop: saved.topmost !== false, title: 'Codex Monitor Widget',
     icon: path.join(__dirname, '../assets/icon.png'),
     webPreferences: { preload: path.join(__dirname, 'widget-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
   window.removeMenu();
@@ -23,11 +23,11 @@ function createWidget({ data, restore, refresh }) {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', e => e.preventDefault());
   const persist = () => {
-    saved = { ...window.getBounds(), pinned: window.isAlwaysOnTop(), mode: saved.mode === true };
+    saved = { ...window.getBounds(), topmost: window.isAlwaysOnTop(), mode: saved.mode === true };
     try { fs.writeFileSync(file, JSON.stringify(saved)); } catch {}
   };
   window.on('moved', persist);
-  const enter = () => { window.setPosition(position().x, position().y); window.showInactive(); window.webContents.send('widget:enter'); };
+  const enter = () => { window.setPosition(position().x, position().y); window.showInactive(); window.setSkipTaskbar(false); window.webContents.send('widget:enter'); };
   let ready = false, wanted = false;
   // ready-to-show can be permanently cancelled when the window is hidden while its
   // first paint is still pending (transparent windows during startup), so treat
@@ -38,6 +38,7 @@ function createWidget({ data, restore, refresh }) {
   const show = () => { saved.mode = true; wanted = true; persist(); if (ready) enter(); };
   const hide = (animate = true) => {
     saved.mode = false; wanted = false; persist();
+    window.setSkipTaskbar(true);
     if (!animate || !ready || !window.isVisible()) { window.hide(); return; }
     window.webContents.send('widget:exit');
     setTimeout(() => { if (!window.isDestroyed() && !wanted) window.hide(); }, 240);

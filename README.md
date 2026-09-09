@@ -4,11 +4,17 @@ Windows desktop application for monitoring local Codex usage, account quotas, to
 
 ## Download
 
-[Download v2.0.2 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.0.2)
+[Download v2.0.3 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.0.3)
 
-Run `Codex-Monitor-Setup-2.0.2.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
+Run `Codex-Monitor-Setup-2.0.3.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
 
 The installer is unsigned. Automatic updates and cross-device synchronization are not included.
+
+## 2.0.3 - Aligned TPS sparkline, topmost widget and taskbar presence / 折线对齐、默认置顶与任务栏常驻
+
+- Thicken the widget TPS sparkline to match the metric bars (3.5px) and align its baseline with them.
+- The desktop widget now floats above other windows by default; unpin any time from the widget menu.
+- Keep a taskbar icon in widget mode: the card owns the slot, so clicking it summons the widget; switching back hands the slot to the main window.
 
 ## 2.0.2 — Manual widget mode switch / 手动小组件模式开关
 

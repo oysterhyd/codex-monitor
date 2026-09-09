@@ -17,7 +17,7 @@ function Sparkline({ points = [], large = false, english }) {
       {large && [0, .5, 1].map(v => <line key={v} x1="0" x2={width} y1={height * v} y2={height * v} stroke="currentColor" strokeDasharray="3 5" opacity=".16" />)}
       {large && [0, .25, .5, .75, 1].map(v => <line key={v} x1={width * v} x2={width * v} y1="0" y2={height} stroke="currentColor" strokeDasharray="3 5" opacity=".12" />)}
       {line && <><path d={`${line} L${width},${height} L0,${height} Z`} fill="#00a88e" opacity=".13" />
-        <path d={line} fill="none" stroke="#00a58e" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" /></>}
+        <path d={line} fill="none" stroke="#00a58e" strokeWidth={large ? 2 : 3.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" /></>}
     </svg>
     {large && <><span className="widget-chart-max">{compact(max === 1 && points.every(p => !p.total) ? 0 : max)}</span>
       <div className="widget-ticks">{[0, 24, 48, 72, 95].map(i => <span key={i}>{points[i] ? new Date(points[i].time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>)}</div></>}

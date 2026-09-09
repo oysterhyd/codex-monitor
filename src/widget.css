@@ -63,7 +63,7 @@ html.widget-mode, .widget-mode body, .widget-mode #root { background: transparen
 .widget-value { font-size: 20px; margin: 5px 0 4px; gap: 2px; letter-spacing: -.6px; }
 .widget-value small { font-size: 8px; }
 .widget-bar { margin: 5px 0 0; }
-.widget-spark { height: 10px; margin: 0; }
+.widget-spark { height: 10px; margin: 0; position: relative; top: -6.6px; }
 .widget-spark svg { height: 10px; }
 .widget-bottom { margin-top: 7px; height: 68px; padding: 8px; grid-template-columns: 100px 1fr; }
 .widget-today-label { gap: 4px; white-space: nowrap; font-size: 10px; }
