@@ -1,5 +1,3 @@
-# Codex Monitor
-
 <div align="center">
   <img src="assets/monitor-glass.png" width="112" alt="Codex Monitor" />
   <h1>Codex Monitor</h1>
