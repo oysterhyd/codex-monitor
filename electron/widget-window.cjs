@@ -6,7 +6,7 @@ function createWidget({ data, restore, refresh }) {
   const file = path.join(data, 'widget-window.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-  const width = 720, height = 520;
+  const width = 360, height = 260;
   const position = () => {
     const area = Number.isFinite(saved.x) && Number.isFinite(saved.y)
       ? screen.getDisplayNearestPoint({ x: saved.x, y: saved.y }).workArea : screen.getPrimaryDisplay().workArea;

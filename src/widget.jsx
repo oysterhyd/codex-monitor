@@ -46,8 +46,7 @@ export function Widget() {
     const expired = q?.resets && q.resets * 1000 <= now;
     const stale = q && (now - Date.parse(q.ts) > 300000 || !data.quotaStatus?.ok);
     return { value: q && !expired ? Math.max(0, 100 - q.used) : null,
-      note: expired ? t('等待重置更新', 'Awaiting reset') : !q ? t('等待额度数据', 'Awaiting quota') : stale ? t('旧快照 · 待刷新', 'Saved · retrying') : t('剩余额度', 'Remaining'),
-      title: q ? `${q.bucket} · ${t('采样', 'Sampled')} ${new Date(q.ts).toLocaleString()}${q.resets ? ` · ${t('重置', 'Resets')} ${new Date(q.resets * 1000).toLocaleString()}` : ''}` : t('当前账号暂无额度快照', 'No quota snapshot for this account') };
+      title: q ? `${expired ? t('等待重置更新 · ', 'Awaiting reset · ') : stale ? t('旧快照 · 待刷新 · ', 'Saved · retrying · ') : ''}${q.bucket} · ${t('采样', 'Sampled')} ${new Date(q.ts).toLocaleString()}${q.resets ? ` · ${t('重置', 'Resets')} ${new Date(q.resets * 1000).toLocaleString()}` : ''}` : t('当前账号暂无额度快照', 'No quota snapshot for this account') };
   };
   const five = quota(300), week = quota(10080);
   const refresh = async () => {
@@ -59,8 +58,8 @@ export function Widget() {
   const cards = [
     { label: t('当前 5h 额度', '5h quota'), icon: Target, ...five },
     { label: t('本周额度', 'Weekly quota'), icon: Stack, ...week },
-    { label: t('实时 TPS', 'Live TPS'), icon: Lightning, value: data && collecting ? data.tps : null, speed: true, note: t('近 60 秒 · 采样', '60s · sampled'), title: t('最近 60 秒日志中的输出 token / 60；包含等待，并非精确生成速度。', 'Output tokens recorded in the last 60 seconds / 60; includes idle time, not exact generation speed.') },
-    { label: t('缓存命中率', 'Cache hit rate'), icon: Coins, value: data?.cacheRate == null ? null : data.cacheRate * 100, note: t('今日 · 按 Token', 'Today · by token'), title: t('当前账号今日缓存输入 / 输入 Token', 'Current account: cached input / input tokens today') },
+    { label: t('实时 TPS', 'Live TPS'), icon: Lightning, value: data && collecting ? data.tps : null, speed: true, title: t('最近 60 秒日志中的输出 token / 60；包含等待，并非精确生成速度。', 'Output tokens recorded in the last 60 seconds / 60; includes idle time, not exact generation speed.') },
+    { label: t('缓存命中率', 'Cache hit rate'), icon: Coins, value: data?.cacheRate == null ? null : data.cacheRate * 100, title: t('当前账号今日缓存输入 / 输入 Token', 'Current account: cached input / input tokens today') },
   ];
   return <main className="desktop-widget" aria-label={t('Codex 桌面小组件', 'Codex desktop widget')}>
     <header className="widget-header" onDoubleClick={() => window.widget.restore()}>
@@ -69,15 +68,14 @@ export function Widget() {
       <span className={`widget-status ${collecting ? '' : 'waiting'}`} role="status"><i />{collecting ? t('采集中', 'Live') : t('等待中', 'Waiting')}</span>
       <button className="widget-menu" aria-label={t('小组件选项', 'Widget options')} onClick={() => window.widget.menu()}><DotsThree size={26} weight="bold" /></button>
     </header>
-    <div className="widget-metrics">{cards.map(({ label, icon: Icon, value, note, title, speed }) => <section className="widget-metric" key={label} title={title}>
+    <div className="widget-metrics">{cards.map(({ label, icon: Icon, value, title, speed }) => <section className="widget-metric" key={label} title={title}>
       <div className="widget-metric-label"><span className={`widget-icon ${speed ? 'blue' : ''}`}><Icon size={23} /></span><span>{label}</span></div>
       <div className="widget-value">{speed ? value == null ? '—' : value.toFixed(1) : percent(value)}{speed && <small>tok/s</small>}</div>
       {speed ? <Sparkline points={data?.speed} english={en} /> : <div className="widget-bar" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value ?? undefined}><span style={{ width: `${value ?? 0}%` }} /></div>}
-      <p className="widget-metric-note">{note}</p>
     </section>)}</div>
     <section className="widget-bottom">
       <div className="widget-today"><div className="widget-today-label"><span className="widget-icon"><Cube size={25} /></span>{t('今日 Token', 'Today’s tokens')}</div>
-        <strong>{compact(data?.total)}</strong><p>{data?.change == null ? t('较昨日 —', 'vs yesterday —') : <>{t('较昨日 ', 'vs yesterday ')}{data.change >= 0 ? '+' : ''}{(data.change * 100).toFixed(1)}% <ArrowUpRight size={17} style={{ transform: data.change < 0 ? 'rotate(90deg)' : undefined }} /></>}</p>
+        <strong>{compact(data?.total)}</strong><p>{data?.change == null ? t('较昨日 —', 'vs yest. —') : <>{t('较昨日 ', 'vs yest. ')}{data.change >= 0 ? '+' : ''}{(data.change * 100).toFixed(1)}% <ArrowUpRight size={17} style={{ transform: data.change < 0 ? 'rotate(90deg)' : undefined }} /></>}</p>
       </div>
       <div className="widget-trend"><h2>{t('Token 使用趋势', 'Token usage')} <span>{t('(近 24 小时)', '(last 24h)')}</span></h2><Sparkline points={data?.timeline} large english={en} /></div>
     </section>

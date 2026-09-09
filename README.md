@@ -4,11 +4,18 @@ Windows desktop application for monitoring local Codex usage, account quotas, to
 
 ## Download
 
-[Download v2.0.0 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.0.0)
+[Download v2.0.1 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.0.1)
 
-Run `Codex-Monitor-Setup-2.0.0.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
+Run `Codex-Monitor-Setup-2.0.1.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
 
 The installer is unsigned. Automatic updates and cross-device synchronization are not included.
+
+## 2.0.1 — Compact widget and updated app icon
+
+- Reduce the desktop widget from 720 × 520 to approximately 360 × 260 logical pixels (one quarter of the area, subject to Windows DPI minimum size).
+- Remove the small captions beneath all four metric cards. Quota freshness and TPS definitions remain available on hover.
+- Update the Windows executable, tray, notification and installer icons to the current glass artwork, with multiple ICO resolutions.
+- Preserve existing widget controls, position, quota data and monitoring.
 
 ## 2.0.0 — Desktop widget / 桌面小组件
 
