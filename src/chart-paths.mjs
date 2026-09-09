@@ -8,7 +8,7 @@ export function chartPaths(points, xy, { step = false, baseline = 150 } = {}) {
     const reset = previous?.resets;
     const crossesReset = step && previous && (
       (reset != null && reset * 1000 > previous.time && reset * 1000 <= points[i].time) ||
-      (reset != null && points[i].resets != null && reset !== points[i].resets)
+      (reset != null && points[i].resets != null && Math.abs(reset - points[i].resets) > 1)
     );
     if (!i || crossesReset) segments.push({ line: `M${x},${y}`, first: x, last: x });
     else {

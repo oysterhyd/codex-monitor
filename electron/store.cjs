@@ -495,9 +495,20 @@ class Store {
       throw e;
     }
   }
+  checkpoint() {
+    try { this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); }
+    catch (error) {
+      if (!/malformed|corrupt/i.test(error.message)) throw error;
+      // Rebuild derived indexes without changing stored records. Some damaged
+      // indexes surface only during a WAL checkpoint, after integrity checks pass.
+      this.db.exec("REINDEX");
+      const check = this.db.prepare("PRAGMA integrity_check").all();
+      if (check.length !== 1 || Object.values(check[0])[0] !== "ok") throw error;
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    }
+  }
   close() {
-    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    this.db.close();
+    try { this.checkpoint(); } finally { this.db.close(); }
   }
 }
 module.exports = { Store, hash };

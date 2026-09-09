@@ -125,7 +125,7 @@ function Chart({
     44 +
       (last > first
         ? (p.time - first) / (last - first)
-        : i / Math.max(1, points.length - 1)) *
+        : points.length === 1 ? 0.5 : i / (points.length - 1)) *
         836,
     150 - ((p[value] || 0) / max) * 128,
   ]);
@@ -309,7 +309,7 @@ function Rank({ rows, type, onSelect }) {
 function App() {
   const [page, setPage] = useState("overview"),
     [data, setData] = useState(null),
-    [filter, setFilter] = useState({ range: "today", account: "current" }),
+    [filter, setFilter] = useState({ range: "today" }),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [toast, setToast] = useState(""),
@@ -322,7 +322,7 @@ function App() {
   requestFilter.current = {...filter,page,recordPage,pageSize:50};
   const refresh = useRef(null);
   if(!refresh.current) refresh.current=createRefresh(
-    async value=>({...await api.snapshot(value), chartTransitionKey: JSON.stringify(value)}),
+    async value=>({...await api.snapshot(value), chartRange: value.range, chartTransitionKey: JSON.stringify(value)}),
     next=>{setLanguage(next.settings.language);setData(next);setError('');setProgress(null);},
     e=>setError(e.message),
   );
@@ -659,7 +659,7 @@ function App() {
                           <i className="blue" />{tr("输出")}<b>{compact(s.output)}</b>
                         </span>
                       </div>
-                      <Chart points={data.timeline} replayKey={data.chartTransitionKey} label={tr("Token 总量趋势")} />
+                      <Chart points={data.timeline} range={data.chartRange === "all" ? undefined : data.range} replayKey={data.chartTransitionKey} label={tr("Token 总量趋势")} />
                     </Panel>
                     <Panel title={tr("任务平均输出速率")}>
                       <div className="speed" title={tr("包含工具与等待时间；日志未提供独立生成时长")}>
@@ -954,7 +954,7 @@ function App() {
                     </div>
                     <Chart
                       points={quotaPoints}
-                      range={filter.range === "all" ? undefined : data.range}
+                      range={data.chartRange === "all" ? undefined : data.range}
                       replayKey={`${data.chartTransitionKey}:${selected?.account}:${selected?.bucket}:${selected?.slot}`}
                       value="remaining"
                       step
