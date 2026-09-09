@@ -34,8 +34,22 @@ export function Widget() {
     update();
     const timer = setInterval(update, 3000);
     const unsubscribe = window.widget.onUpdate(update);
+    const node = () => document.querySelector('.desktop-widget');
+    const enterFx = () => {
+      const el = node(); if (!el) return;
+      el.classList.remove('widget-out');
+      requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('widget-in')));
+    };
+    const exitFx = () => {
+      const el = node(); if (!el) return;
+      el.classList.remove('widget-in');
+      el.classList.add('widget-out');
+    };
     document.addEventListener('visibilitychange', update);
-    return () => { alive = false; clearInterval(timer); unsubscribe(); document.removeEventListener('visibilitychange', update); };
+    const offExit = window.widget.onExit(exitFx);
+    const offEnter = window.widget.onEnter(enterFx);
+    return () => { alive = false; clearInterval(timer); unsubscribe(); offExit(); offEnter();
+      document.removeEventListener('visibilitychange', update); };
   }, []);
   const en = data?.language === 'en', t = (zh, english) => en ? english : zh;
   const now = Date.now();

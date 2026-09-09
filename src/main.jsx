@@ -20,6 +20,7 @@ import {
   Stack,
   Target,
   FolderOpen,
+  FrameCorners,
 } from "@phosphor-icons/react";
 import "./style.css";
 import "./glass.css";
@@ -340,12 +341,15 @@ function App() {
     const timer=setInterval(()=>{if(!document.hidden)load();},30000);
     const wake=()=>{if(!document.hidden)load();};
     document.addEventListener('visibilitychange',wake);
-    const off=api?.onUpdate(msg=>{
-      if(msg?.type==='progress')setProgress(msg.data);
-      if(msg?.type==='error')setError(msg.data);
-      if((!msg || ['updated','recovered'].includes(msg.type))&&!document.hidden)load();
+    const appEl=document.querySelector('.app');
+    const offEnter=api?.onEnterApp(()=>{
+      if(!appEl)return;
+      appEl.classList.remove('app-to-widget','app-enter');
+      void appEl.offsetWidth;
+      appEl.classList.add('app-enter');
     });
-    return ()=>{clearInterval(timer);off?.();document.removeEventListener('visibilitychange',wake);};
+    appEl?.addEventListener('animationend',e=>{if(e.animationName==='app-enter')appEl.classList.remove('app-enter');});
+    return ()=>{clearInterval(timer);off?.();offEnter?.();document.removeEventListener('visibilitychange',wake);};
   },[]);
   useEffect(() => {
     document.documentElement.dataset.theme = data?.settings.theme || "system";
@@ -369,6 +373,13 @@ function App() {
     }
   };
   const choose = (key, value) => setFilter((f) => ({ ...f, [key]: value }));
+  const enterWidgetMode = () => {
+    const appEl = document.querySelector('.app');
+    if (appEl) {
+      appEl.classList.add('app-to-widget');
+      setTimeout(() => api.widgetMode(true).catch(() => appEl.classList.remove('app-to-widget')), 180);
+    } else api.widgetMode(true);
+  };
   const nav = [
     ["overview", Activity, tr("总览")],
     ["history", ClockCounterClockwise, tr("历史分析")],
@@ -410,6 +421,10 @@ function App() {
           ))}
         </nav>
           <div className="header-actions">
+            <label className="widget-switch" title={tr("切换到桌面小组件模式")}>
+              <span className="widget-switch-label"><FrameCorners size={15} aria-hidden="true" />{tr("小组件")}</span>
+              <input type="checkbox" role="switch" aria-label={tr("桌面小组件模式")} disabled={!api || busy} onChange={enterWidgetMode} />
+            </label>
             {data?.settings.muted && <BellSlash size={16} />}
             <span className="status-pill">
               <span className="status-dot" />

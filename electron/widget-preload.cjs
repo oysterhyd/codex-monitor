@@ -9,4 +9,14 @@ contextBridge.exposeInMainWorld('widget', {
     ipcRenderer.on('update', listener);
     return () => ipcRenderer.removeListener('update', listener);
   },
+  onExit: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('widget:exit', listener);
+    return () => ipcRenderer.removeListener('widget:exit', listener);
+  },
+  onEnter: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('widget:enter', listener);
+    return () => ipcRenderer.removeListener('widget:enter', listener);
+  },
 });

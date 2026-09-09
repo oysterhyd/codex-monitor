@@ -17,20 +17,31 @@ function createWidget({ data, restore, refresh }) {
     backgroundColor: '#00000000', hasShadow: false, resizable: false, maximizable: false, fullscreenable: false,
     skipTaskbar: true, show: false, alwaysOnTop: saved.pinned === true, title: 'Codex Monitor Widget',
     icon: path.join(__dirname, '../assets/icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'widget-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    webPreferences: { preload: path.join(__dirname, 'widget-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
   window.removeMenu();
   window.on('page-title-updated', event => event.preventDefault());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', e => e.preventDefault());
   const persist = () => {
-    saved = { ...window.getBounds(), pinned: window.isAlwaysOnTop() };
+    saved = { ...window.getBounds(), pinned: window.isAlwaysOnTop(), mode: saved.mode === true };
     try { fs.writeFileSync(file, JSON.stringify(saved)); } catch {}
   };
   window.on('moved', persist);
+  const enter = () => { window.setPosition(position().x, position().y); window.showInactive(); window.webContents.send('widget:enter'); };
   let ready = false, wanted = false;
-  window.once('ready-to-show', () => { ready = true; if (wanted) window.showInactive(); });
-  const show = () => { wanted = true; window.setPosition(position().x, position().y); if (ready) window.showInactive(); };
-  const hide = () => { wanted = false; window.hide(); };
+  // ready-to-show can be permanently cancelled when the window is hidden while its
+  // first paint is still pending (transparent windows during startup), so treat
+  // did-finish-load as an equally valid readiness signal.
+  const markReady = () => { if (ready) return; ready = true; if (wanted) enter(); };
+  window.once('ready-to-show', markReady);
+  window.webContents.once('did-finish-load', markReady);
+  const show = () => { saved.mode = true; wanted = true; persist(); if (ready) enter(); };
+  const hide = (animate = true) => {
+    saved.mode = false; wanted = false; persist();
+    if (!animate || !ready || !window.isVisible()) { window.hide(); return; }
+    window.webContents.send('widget:exit');
+    setTimeout(() => { if (!window.isDestroyed() && !wanted) window.hide(); }, 240);
+  };
   window.on('close', event => { event.preventDefault(); hide(); });
   const reposition = () => { if (window.isVisible()) window.setPosition(position().x, position().y); };
   screen.on('display-removed', reposition);
@@ -43,7 +54,7 @@ function createWidget({ data, restore, refresh }) {
       { label: '置顶 / Always on top', type: 'checkbox', checked: window.isAlwaysOnTop(), click: item => { window.setAlwaysOnTop(item.checked); persist(); } },
       { label: '刷新数据 / Refresh', click: refresh },
       { type: 'separator' },
-      { label: '暂时隐藏 / Hide widget', click: hide },
+      { label: '隐藏小组件 / Hide widget', click: () => hide() },
     ]).popup({ window });
   } };
 }

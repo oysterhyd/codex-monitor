@@ -4,11 +4,18 @@ Windows desktop application for monitoring local Codex usage, account quotas, to
 
 ## Download
 
-[Download v2.0.1 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.0.1)
+[Download v2.0.2 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.0.2)
 
-Run `Codex-Monitor-Setup-2.0.1.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
+Run `Codex-Monitor-Setup-2.0.2.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
 
 The installer is unsigned. Automatic updates and cross-device synchronization are not included.
+
+## 2.0.2 — Manual widget mode switch / 手动小组件模式开关
+
+- Replace the automatic minimize/restore triggers with a manual glass switch in the top bar; the tray menu item is now a checkbox as well. Close-to-tray no longer forces the widget on.
+- Widget mode persists across restarts: relaunching shows only the desktop card until you switch back.
+- Smooth transitions: the main window fades and scales down when entering widget mode, the glass card springs in and fades out on switch, respecting reduced-motion preferences.
+- The desktop widget keeps drag, pin, refresh and restore controls; layout and monitoring data are unchanged.
 
 ## 2.0.1 — Compact widget and updated app icon
 

@@ -20,7 +20,8 @@ let win,
   tray,
   worker,
   quitting = false,
-  settings = {};
+  settings = {},
+  widgetMode = false;
 const { translate } = require("./translate.cjs");
 const tr = (message, ...values) => translate(settings.language, message, ...values);
 const smoke = process.env.MONITOR_TEST_DATA;
@@ -32,10 +33,24 @@ if (!app.requestSingleInstanceLock()) {
     if (win) restoreMain();
   });
   function restoreMain() {
-    widget?.hide();
-    if (win.isMinimized()) win.restore();
+    setWidgetMode(false);
     win.show();
     win.focus();
+  }
+  function setWidgetMode(on) {
+    widgetMode = !!on;
+    if (widgetMode) {
+      win.hide();
+      widget?.show();
+    } else {
+      widget?.hide();
+      if (win.isMinimized()) win.restore();
+      if (!win.isVisible()) {
+        win.show();
+        win.webContents.send("app:enter");
+      }
+    }
+    if (tray) trayMenu();
   }
   function request(method, args) {
     if (quitting) return Promise.reject(new Error('应用正在退出'));
@@ -51,7 +66,7 @@ if (!app.requestSingleInstanceLock()) {
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: tr("打开 Codex Monitor"), click: restoreMain },
-        { label: "桌面小组件 / Desktop widget", click: () => { win.minimize(); widget.show(); } },
+        { label: "桌面小组件 / Desktop widget", type: "checkbox", checked: widgetMode, click: item => setWidgetMode(item.checked) },
         { label: tr("刷新额度"), click: () => request("refresh").catch(() => {}) },
         {
           label: tr("静音提醒"),
@@ -78,6 +93,7 @@ if (!app.requestSingleInstanceLock()) {
     app.setAppUserModelId("local.codex.monitor");
     const data = app.getPath("userData");
     fs.mkdirSync(data, { recursive: true });
+    try { widgetMode = JSON.parse(fs.readFileSync(path.join(data, "widget-window.json"), "utf8")).mode === true; } catch {}
     worker = new WorkerManager(path.join(__dirname, "worker.cjs"), {
         db: path.join(data, "monitor.sqlite"),
         home:
@@ -146,14 +162,11 @@ if (!app.requestSingleInstanceLock()) {
       if (!quitting) {
         event.preventDefault();
         win.hide();
-        widget?.show();
       }
     });
-    win.on("minimize", () => widget?.show());
-    win.on("restore", () => widget?.hide());
     win.on("show", () => { if (!win.isMinimized()) widget?.hide(); });
     win.once("ready-to-show", () => {
-      if (!process.argv.includes("--hidden") && !win.isMinimized()) win.show();
+      if (!process.argv.includes("--hidden") && !widgetMode && !win.isMinimized()) win.show();
     });
     tray = new Tray(path.join(__dirname, "../assets/icon.png"));
     tray.setToolTip(tr("Codex Monitor · 本机用量监测"));
@@ -194,6 +207,7 @@ if (!app.requestSingleInstanceLock()) {
       return settings;
     });
     handle("account", value => request("account", value));
+    handle("widgetMode", (on) => { setWidgetMode(on); return widgetMode; });
     handle("assignAccount", async value => {
       const result = await dialog.showMessageBox(win, { type: "question", title: tr("历史账号归属"), message: value.turn ? tr("将此任务的全部用量记录归属到所选账号？此操作不修改额度快照。") : tr("将当前时间范围内全部未归属记录指定给所选账号？"), buttons: [tr("取消"), tr("确认归属")], defaultId: 0, cancelId: 0 });
       return result.response === 1 ? request("assignAccount", value) : null;
@@ -236,6 +250,7 @@ if (!app.requestSingleInstanceLock()) {
     handle("openData", () => shell.openPath(data));
     await win.loadFile(path.join(__dirname, "../dist/index.html"));
     widget = createWidget({ data, restore: restoreMain, refresh: () => request("refresh").catch(() => {}) });
+    if (widgetMode) widget.show();
     for (const [name, fn] of Object.entries({ snapshot: () => request("widget"), restore: restoreMain,
       menu: () => widget.menu(), refresh: () => request("refresh") })) {
       ipcMain.handle(`widget:${name}`, event => {
@@ -243,7 +258,6 @@ if (!app.requestSingleInstanceLock()) {
         return fn();
       });
     }
-    if (win.isMinimized()) widget.show();
     request("snapshot", {})
       .then((s) => {
         settings = s.settings;

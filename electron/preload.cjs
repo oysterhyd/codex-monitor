@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld("monitor", {
   clear: () => ipcRenderer.invoke("clear"),
   pickExecutable: () => ipcRenderer.invoke("pickExecutable"),
   openData: () => ipcRenderer.invoke("openData"),
+  widgetMode: (on) => ipcRenderer.invoke("widgetMode", on),
+  onEnterApp: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("app:enter", listener);
+    return () => ipcRenderer.removeListener("app:enter", listener);
+  },
   onUpdate: (callback) => {
     const listener = (_, value) => callback(value);
     ipcRenderer.on("update", listener);
