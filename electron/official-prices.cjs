@@ -4,6 +4,9 @@
 module.exports = {
   source: "Standard 标准价 · 短上下文 · 官网核对 2026-09-09",
   rates: [
+    // GPT-5.5 / GPT-5.4 verified 2026-09-10 on their official model pages.
+    ["gpt-5.5", 5, 0.5, 30, 0],
+    ["gpt-5.4", 2.5, 0.25, 15, 0],
     ["gpt-6-astra", 10, 1, 50, 12.5],
     ["gpt-5.6-sol", 4, 0.4, 20, 5],
     ["gpt-5.6-terra", 2, 0.2, 12, 2.5],

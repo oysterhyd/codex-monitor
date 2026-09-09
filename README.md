@@ -4,11 +4,15 @@ Windows desktop application for monitoring local Codex usage, account quotas, to
 
 ## Download
 
-[Download v1.0.5 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v1.0.5)
+[Download v1.0.6 for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/tag/v1.0.6)
 
-Run `Codex-Monitor-Setup-1.0.5.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
+Run `Codex-Monitor-Setup-1.0.6.exe`. The installer supports per-user installation and upgrading an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
 
 The installer is unsigned. Automatic updates and cross-device synchronization are not included.
+
+## 1.0.6
+
+内置 GPT-5.5（输入 / 缓存输入 / 输出：$5 / $0.50 / $30）和 GPT-5.4（$2.50 / $0.25 / $15）的标准短上下文价格，单位为美元 / 百万 tokens。升级自动补齐缺失价格，保留已有手动设置；历史记录按此基准估算。
 
 ## 1.0.5
 

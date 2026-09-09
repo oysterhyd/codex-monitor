@@ -119,6 +119,18 @@ class Store {
         throw e;
       }
     }
+    if (!this.get("legacy-model-prices-v1")) {
+      this.db.exec("BEGIN");
+      try {
+        for (const [model,input,cached,output,write] of officialPrices.rates.filter(r => ["gpt-5.5","gpt-5.4"].includes(r[0]))) {
+          if (this.db.prepare("SELECT 1 FROM prices WHERE model=? AND retired=0").get(model)) continue;
+          this.db.prepare("INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)")
+            .run(model,"1970-01-01T00:00:00.000Z",input,cached,output,write,"Standard 标准价 · 短上下文 · 官网核对 2026-09-10；历史按此基准估算");
+        }
+        this.set("legacy-model-prices-v1",true);
+        this.db.exec("COMMIT");
+      } catch(error) { this.db.exec("ROLLBACK"); throw error; }
+    }
   }
   get(key) {
     const row = this.db.prepare("SELECT value FROM kv WHERE key=?").get(key);
