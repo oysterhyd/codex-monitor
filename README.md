@@ -1,13 +1,23 @@
 # Codex Monitor
 
+<div align="center">
+  <img src="assets/monitor-glass.png" width="112" alt="Codex Monitor" />
+  <h1>Codex Monitor</h1>
+  <p><b>Windows desktop app for monitoring local Codex usage and quotas</b></p>
+  <p>Token usage · API-equivalent cost · Cache hit rate · Task metrics · 5h / weekly quotas · Liquid-glass desktop widget</p>
+  <p>
+    <a href="https://github.com/oysterhyd/codex-monitor/releases/latest"><img src="https://img.shields.io/github/v/release/oysterhyd/codex-monitor" alt="Release" /></a>
+    <a href="https://github.com/oysterhyd/codex-monitor/releases/latest"><img src="https://img.shields.io/badge/platform-Windows%20x64-0069c4" alt="Platform" /></a>
+  </p>
+  <p>简体中文 / English</p>
+</div>
+
 <p align="center">
   <img src="assets/screenshots/app-overview.png" alt="Usage overview" />
 </p>
 <p align="center">
   <img src="assets/screenshots/desktop-widget.png" width="380" alt="Desktop widget" />
 </p>
-
-Windows desktop application for monitoring local Codex usage, account quotas, token costs, and task performance. Supports 简体中文 and English, and ships a liquid-glass style desktop widget.
 
 ## Download
 
