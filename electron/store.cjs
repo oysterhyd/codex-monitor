@@ -30,9 +30,13 @@ class Store {
       CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,project TEXT,origin TEXT,created TEXT);
       CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,session TEXT,turn TEXT,ts TEXT,model TEXT,input INTEGER,cached INTEGER,output INTEGER,reasoning INTEGER,cache_write INTEGER,kind TEXT);
       CREATE INDEX IF NOT EXISTS usage_time ON usage(ts);
+      CREATE INDEX IF NOT EXISTS usage_turn_session ON usage(turn,session);
       CREATE TABLE IF NOT EXISTS turns(id TEXT PRIMARY KEY,session TEXT,model TEXT,started TEXT,ended TEXT,status TEXT,duration REAL,ttft REAL,last_seen TEXT);
       CREATE TABLE IF NOT EXISTS quotas(id TEXT PRIMARY KEY,ts TEXT,bucket TEXT,slot TEXT,used REAL,minutes REAL,resets REAL,plan TEXT,source TEXT);
       CREATE INDEX IF NOT EXISTS quota_time ON quotas(ts);
+      CREATE INDEX IF NOT EXISTS turns_started ON turns(started);
+      CREATE INDEX IF NOT EXISTS turns_active ON turns(status,last_seen);
+      CREATE INDEX IF NOT EXISTS quota_bucket_time ON quotas(bucket,slot,ts DESC);
       CREATE TABLE IF NOT EXISTS prices(id INTEGER PRIMARY KEY,model TEXT,effective TEXT,input REAL,cached REAL,output REAL,cache_write REAL,source TEXT);
       CREATE TABLE IF NOT EXISTS notices(id TEXT PRIMARY KEY,ts TEXT);
     `);
@@ -341,19 +345,37 @@ class Store {
         .prepare("UPDATE turns SET model=?,last_seen=? WHERE id=?")
         .run(s.model || "unknown", ts, s.turn);
   }
-  async scan(home, onProgress = () => {}) {
+  async scan(home, onProgress = () => {}, options = {}) {
     this.replayingRecovered = !!this.get("replayRecovered");
-    const files = [];
+    const now = Date.now();
+    const full = options.full || !this.catalog || this.catalogHome !== home || now - this.lastDiscovery >= 60000;
+    if(full) { this.catalog = new Map(); this.catalogHome=home; }
     const walk = (dir) => {
       if (!fs.existsSync(dir)) return;
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const f = path.join(dir, e.name);
         if (e.isDirectory()) walk(f);
-        else if (e.isFile() && e.name.endsWith(".jsonl")) files.push(f);
+        else if (e.isFile() && e.name.endsWith('.jsonl') && !this.catalog.has(f)) this.catalog.set(f,now);
       }
     };
-    walk(path.join(home, "sessions"));
-    walk(path.join(home, "archived_sessions"));
+    if(full) {
+      walk(path.join(home,'sessions'));
+      walk(path.join(home,'archived_sessions'));
+      this.lastDiscovery=now;
+    } else {
+      // New rollouts use dated directories. A complete discovery catches other layouts and moved archives.
+      for(let days=0;days<2;days++) {
+        const d=new Date(now-days*86400000);
+        for(const parts of [[d.getFullYear(),d.getMonth()+1,d.getDate()],[d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate()]])
+          walk(path.join(home,'sessions',...parts.map((n,i)=>i?String(n).padStart(2,'0'):String(n))));
+      }
+    }
+    const files = [...this.catalog].filter(([,modified])=>full || now-modified<120000).map(([file])=>file);
+    let changed = false;
+    const diagnostics = [];
+    const report = (code,file) => {
+      if(diagnostics.length<20) diagnostics.push({code,fileId:hash(file).slice(0,12)});
+    };
     let scanned = 0,
       errors = 0;
     for (const file of files) {
@@ -361,14 +383,17 @@ class Store {
       try {
         st = fs.statSync(file);
       } catch {
-        errors++;
+        errors++; report('file_stat',file);
+        this.catalog.delete(file);
         continue;
       }
+      this.catalog.set(file,st.mtimeMs);
       const old = this.db.prepare("SELECT * FROM files WHERE path=?").get(file);
       if (old && old.offset === st.size && old.mtime === st.mtimeMs) {
         scanned++;
         continue;
       }
+      changed = true;
       let offset = old && old.offset <= st.size ? old.offset : 0;
       const state = offset && old ? JSON.parse(old.state) : {};
       if (state.desktop === false && offset) {
@@ -402,7 +427,7 @@ class Store {
               try {
                 this.process(JSON.parse(line.toString("utf8")), state);
               } catch {
-                errors++;
+                errors++; report('record_parse',file);
               }
             }
           }
@@ -414,14 +439,18 @@ class Store {
         this.db.exec("COMMIT");
       } catch {
         this.db.exec("ROLLBACK");
-        errors++;
+        errors++; report('file_read',file);
       }
       scanned++;
       if (scanned % 10 === 0) onProgress({ scanned, total: files.length });
     }
     const status = {
       scanned,
-      total: files.length,
+      total: this.catalog.size,
+      checked: files.length,
+      full,
+      changed,
+      diagnostics,
       errors,
       lastScan: new Date().toISOString(),
       sourceExists: fs.existsSync(path.join(home, "sessions")),

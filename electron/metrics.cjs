@@ -48,6 +48,12 @@ function bucketOf(ts, hourly) {
 }
 function summarize(store, filter = {}) {
   const { start, end } = bounds(filter);
+  const page = filter.page || 'all';
+  const analytics = ['all', 'overview', 'history'].includes(page);
+  const recordsWanted = ['all', 'history'].includes(page);
+  const historyWanted = ['all', 'quota'].includes(page);
+  const pageSize = Math.max(1, Math.min(200, Math.floor(Number(filter.pageSize) || 200)));
+  const requestedPage = Math.max(1, Math.floor(Number(filter.recordPage) || 1));
   const prices = store.prices();
   const sessions = store.db.prepare("SELECT * FROM sessions").all(),
     sessionMap = new Map(sessions.map((s) => [s.id, s]));
@@ -56,16 +62,17 @@ function summarize(store, filter = {}) {
     (!filter.project ||
       sessionMap.get(r.session)?.project === filter.project) &&
     (!filter.session || r.session === filter.session);
-  const rows = store.db
-    .prepare("SELECT * FROM usage WHERE ts>=? AND ts<? ORDER BY ts")
-    .all(start, end)
-    .filter(accepts);
-  const turns = store.db
-    .prepare(
-      "SELECT * FROM turns WHERE started>=? AND started<? ORDER BY started DESC",
-    )
-    .all(start, end)
-    .filter(accepts);
+  const conditions = ['u.ts>=?', 'u.ts<?'];
+  const params = [start, end];
+  for (const [key, column] of [['model','u.model'], ['session','u.session'], ['project','s.project']]) {
+    if (filter[key]) { conditions.push(`${column}=?`); params.push(filter[key]); }
+  }
+  const rows = analytics ? store.db.prepare(`SELECT u.* FROM usage u LEFT JOIN sessions s ON s.id=u.session WHERE ${conditions.join(' AND ')} ORDER BY u.ts`).all(...params) : [];
+  const turnConditions=['t.started>=?','t.started<?'], turnParams=[start,end];
+  if(filter.model) {turnConditions.push('(t.model=? OR EXISTS (SELECT 1 FROM usage u WHERE u.turn=t.id AND u.session=t.session AND u.model=?))');turnParams.push(filter.model,filter.model);}
+  if(filter.session){turnConditions.push('t.session=?');turnParams.push(filter.session);}
+  if(filter.project){turnConditions.push('s.project=?');turnParams.push(filter.project);}
+  const turns = analytics ? store.db.prepare(`SELECT t.* FROM turns t LEFT JOIN sessions s ON s.id=t.session WHERE ${turnConditions.join(' AND ')} ORDER BY t.started DESC,t.id DESC`).all(...turnParams) : [];
   const sums = {
     input: 0,
     cached: 0,
@@ -126,42 +133,72 @@ function summarize(store, filter = {}) {
     aborted = turns.filter((t) => t.status === "aborted");
   const timed = completed.filter((t) => t.duration > 0);
   const latency = turns.filter((t) => t.ttft !== null);
-  const turnUsage = store.db.prepare("SELECT * FROM usage WHERE turn=? AND session=?");
-  const turnRecords = turns.slice(0, 200).map(t => {
-    const records = turnUsage.all(t.id, t.session);
-    const totals = { input: 0, cached: 0, output: 0, inputCost: 0, outputCost: 0, cost: 0, unpriced: 0, requests: records.length };
-    for (const row of records) {
-      for (const key of ['input', 'cached', 'output']) totals[key] += row[key];
-      const price = costOf(row, prices);
-      if (price.cost === null) totals.unpriced++;
-      else for (const key of ['inputCost', 'outputCost', 'cost']) totals[key] += price[key];
+  const recordPage = Math.min(requestedPage, Math.max(1, Math.ceil(turns.length / pageSize)));
+  const selectedTurns = recordsWanted ? turns.slice((recordPage - 1) * pageSize, recordPage * pageSize) : [];
+  const usageByTurn = new Map(), outputByTurn = new Map();
+  if (analytics) {
+    for (const r of store.db.prepare(`SELECT t.id, COALESCE(SUM(u.output),0) output FROM turns t
+      LEFT JOIN usage u ON u.turn=t.id AND u.session=t.session
+      WHERE t.started>=? AND t.started<? GROUP BY t.id`).iterate(start,end)) outputByTurn.set(r.id,r.output);
+  }
+  if (selectedTurns.length) {
+    const ids = selectedTurns.map(t=>t.id);
+    for (const r of store.db.prepare(`SELECT u.* FROM usage u JOIN turns t ON t.id=u.turn AND t.session=u.session
+      WHERE t.id IN (${ids.map(()=>'?').join(',')}) ORDER BY u.ts`).iterate(...ids)) {
+      if (!usageByTurn.has(r.turn)) usageByTurn.set(r.turn,[]);
+      usageByTurn.get(r.turn).push(r);
     }
-    if (!records.length || totals.unpriced === records.length) {
-      totals.inputCost = totals.outputCost = totals.cost = null;
+  }
+  const emptyTotals = () => ({input:0,cached:0,output:0,inputCost:0,outputCost:0,cost:0,unpriced:0,requests:0});
+  const add = (total,row) => {
+    total.requests++;
+    for(const key of ['input','cached','output']) total[key]+=row[key];
+    const price=costOf(row,prices);
+    if(price.cost===null) total.unpriced++;
+    else for(const key of ['inputCost','outputCost','cost']) total[key]+=price[key];
+  };
+  const finish = total => {
+    if(!total.requests || total.unpriced===total.requests) total.inputCost=total.outputCost=total.cost=null;
+    return total;
+  };
+  const turnRecords = selectedTurns.map(t => {
+    const totals=emptyTotals(), models=new Map();
+    for(const row of usageByTurn.get(t.id)||[]) {
+      add(totals,row);
+      if(!models.has(row.model)) models.set(row.model,{model:row.model,...emptyTotals()});
+      add(models.get(row.model),row);
     }
-    return { ...t, ...totals, project: sessionMap.get(t.session)?.project || "未归属项目" };
+    return {...t,...finish(totals),models:[...models.values()].map(finish),project:sessionMap.get(t.session)?.project||'未归属项目'};
   });
-  // Include full turn output for speed, even when the date filter starts midway through a turn.
-  const speeds = timed
-    .map((t) => ({
-      ...t,
-      output: store.db
-        .prepare("SELECT COALESCE(SUM(output),0) n FROM usage WHERE turn=?")
-        .get(t.id).n,
-    }))
-    .filter((t) => t.output > 0);
+  const speeds = timed.map(t=>({...t,output:outputByTurn.get(t.id)||0})).filter(t=>t.output>0);
   const duration = speeds.reduce((s, t) => s + t.duration, 0),
     output = speeds.reduce((s, t) => s + t.output, 0);
   const active = store.db
     .prepare("SELECT * FROM turns WHERE status='running' AND last_seen>=?")
     .all(new Date(Date.now() - 120000).toISOString())
     .filter(accepts);
-  const quotas = store.db
-    .prepare("SELECT * FROM quotas ORDER BY ts DESC")
-    .all();
-  const latest = {};
-  for (const q of quotas) latest[`${q.bucket}:${q.slot}`] ??= q;
-  const history = quotas.filter((q) => q.ts >= start && q.ts < end).reverse();
+  const latest = store.db.prepare(`SELECT q.* FROM
+    (SELECT DISTINCT bucket,slot FROM quotas) b JOIN quotas q ON q.rowid=(
+      SELECT rowid FROM quotas WHERE bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)`).all();
+  const history = [];
+  let historySamples = 0;
+  if(historyWanted) {
+    const extent = store.db.prepare('SELECT MIN(ts) first,MAX(ts) last FROM quotas WHERE ts>=? AND ts<?').get(start,end);
+    const width = Math.max(1,(Date.parse(extent.last)-Date.parse(extent.first))/150);
+    const bins = new Map();
+    for(const q of store.db.prepare('SELECT * FROM quotas WHERE ts>=? AND ts<? ORDER BY ts').iterate(start,end)) {
+      historySamples++;
+      const key = `${q.bucket}:${q.slot}:${q.resets}:${Math.floor((Date.parse(q.ts)-Date.parse(extent.first))/width)}`;
+      let bin=bins.get(key);
+      if(!bin) bins.set(key,bin={first:q,last:q,min:q,max:q});
+      bin.last=q;
+      if(q.used<bin.min.used)bin.min=q;
+      if(q.used>bin.max.used)bin.max=q;
+    }
+    const points=new Map();
+    for(const bin of bins.values()) for(const q of Object.values(bin)) points.set(q.id,q);
+    history.push(...[...points.values()].sort((a,b)=>a.ts.localeCompare(b.ts)));
+  }
   const rank = (map) => Object.values(map).sort((a, b) => b.total - a.total);
   const latestSpeed = speeds[0];
   return {
@@ -213,7 +250,9 @@ function summarize(store, filter = {}) {
         ).getTime(),
       })),
     turns: turnRecords,
-    quotas: Object.values(latest),
+    quotas: latest,
+    records: { page: recordPage, pageSize, total: turns.length, pages: Math.max(1,Math.ceil(turns.length/pageSize)) },
+    quotaHistorySamples: historySamples,
     quotaHistory: history,
     scan: store.get("scan"),
     quotaStatus: store.get("quotaStatus"),

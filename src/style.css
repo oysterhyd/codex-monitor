@@ -958,3 +958,10 @@ code {
     transform: none;
   }
 }
+
+.pagination { display:flex;align-items:center;justify-content:flex-end;gap:16px;margin-top:18px;font-size:13px; }
+.record-detail { border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit;padding:0; }
+.record-detail small { text-decoration:underline;text-underline-offset:3px; }
+.record-expanded td { white-space:normal;overflow-wrap:anywhere; }
+.model-details { display:grid;gap:12px;margin-top:14px; }
+.model-details > div { display:flex;flex-wrap:wrap;gap:10px 24px; }

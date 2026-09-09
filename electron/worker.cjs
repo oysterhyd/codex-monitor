@@ -12,13 +12,15 @@ function readQuota(options) {
     emit("readQuota", options);
   });
 }
-async function scan() {
+async function scan(full = false) {
   if (scanning || shutting) return;
   scanning = true;
   try {
-    await store.scan(workerData.home, (p) => emit("progress", p));
-    emit("updated", null);
+    const status = await store.scan(workerData.home, (p) => emit("progress", p), {full});
+    if(status.changed || status.errors || status.full) emit("updated", null);
+    if(status.errors) emit('diagnostic',{code:'scan_records',count:status.errors,items:status.diagnostics});
   } catch {
+    emit('diagnostic',{code:'scan_failed'});
     emit("error", "读取本机统计记录失败，将自动重试");
   } finally {
     scanning = false;
@@ -102,7 +104,7 @@ parentPort.on("message", (msg) => {
           result = true;
           break;
         case "refresh":
-          await scan();
+          await scan(true);
           await quota();
           result = true;
           break;
@@ -123,8 +125,11 @@ parentPort.on("message", (msg) => {
 });
 queue = queue.then(scan);
 quota();
+let scanQueued = false;
 const scanTimer=setInterval(() => {
-  queue = queue.then(scan);
+  if(scanQueued || shutting) return;
+  scanQueued=true;
+  queue = queue.then(()=>scan()).finally(()=>{scanQueued=false;});
 }, 3000);
 const quotaTimer=setInterval(() => {
   const t = store.get("quotaStatus")?.attempted;

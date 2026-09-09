@@ -9,7 +9,7 @@ const {
   dialog,
   shell,
 } = require("electron");
-const { Worker } = require("node:worker_threads");
+const { WorkerManager } = require("./worker-manager.cjs");
 const { readQuota, stopQueries } = require("./quota.cjs");
 const path = require("node:path"),
   fs = require("node:fs"),
@@ -18,10 +18,7 @@ let win,
   tray,
   worker,
   quitting = false,
-  settings = {},
-  counter = 0;
-let workerFailure;
-const pending = new Map();
+  settings = {};
 const smoke = process.env.MONITOR_TEST_DATA;
 if (smoke) app.setPath("userData", path.resolve(smoke));
 if (!app.requestSingleInstanceLock()) {
@@ -33,18 +30,7 @@ if (!app.requestSingleInstanceLock()) {
       win.focus();
     }
   });
-  function request(method, args) {
-    if (workerFailure) return Promise.reject(workerFailure);
-    return new Promise((resolve, reject) => {
-      const id = ++counter,
-        timer = setTimeout(() => {
-          pending.delete(id);
-          reject(new Error("后台正在导入或查询，请稍后重试"));
-        }, 120000);
-      pending.set(id, { resolve, reject, timer });
-      worker.postMessage({ id, method, args });
-    });
-  }
+  function request(method, args) { return worker.request(method,args); }
   function notifyUI(data) {
     if (win && !win.isDestroyed()) win.webContents.send("update", data);
   }
@@ -58,7 +44,7 @@ if (!app.requestSingleInstanceLock()) {
           type: "checkbox",
           checked: !!settings.muted,
           click: async (item) => {
-            settings = await request("settings", { muted: item.checked });
+            settings = await request("settings", { muted: item.checked }).catch(()=>settings);
             notifyUI();
             trayMenu();
           },
@@ -78,33 +64,22 @@ if (!app.requestSingleInstanceLock()) {
     app.setAppUserModelId("local.codex.monitor");
     const data = app.getPath("userData");
     fs.mkdirSync(data, { recursive: true });
-    worker = new Worker(path.join(__dirname, "worker.cjs"), {
-      workerData: {
+    worker = new WorkerManager(path.join(__dirname, "worker.cjs"), {
         db: path.join(data, "monitor.sqlite"),
         home:
           process.env.MONITOR_CODEX_HOME ||
           process.env.CODEX_HOME ||
           path.join(os.homedir(), ".codex"),
-      },
     });
-    worker.on("message", async (msg) => {
+    worker.on("message", async (msg, reply) => {
       if (msg.type === "readQuota") {
         try {
-          worker.postMessage({
+          reply({
             quotaReply: true,
             result: await readQuota(msg.data),
           });
         } catch (e) {
-          worker.postMessage({ quotaReply: true, error: e.message });
-        }
-        return;
-      }
-      if (msg.id) {
-        const p = pending.get(msg.id);
-        if (p) {
-          clearTimeout(p.timer);
-          pending.delete(msg.id);
-          msg.error ? p.reject(new Error(msg.error)) : p.resolve(msg.result);
+          reply({ quotaReply: true, error: e.message });
         }
         return;
       }
@@ -123,7 +98,7 @@ if (!app.requestSingleInstanceLock()) {
             for (const threshold of [20, 10])
               if (remaining <= threshold) {
                 const key = [q.limitId, slot, w.resetsAt, threshold].join(":");
-                if (await request("notice", key))
+                if (await request("notice", key).catch(()=>false))
                   new Notification({
                     title: "Codex 额度提醒",
                     body: `${q.limitName || q.limitId || "Codex"} · ${w.windowDurationMins} 分钟窗口剩余 ${remaining.toFixed(0)}%`,
@@ -133,15 +108,6 @@ if (!app.requestSingleInstanceLock()) {
           }
       }
       notifyUI(msg);
-    });
-    worker.on("error", () => {
-      workerFailure = new Error("采集进程异常，请退出后重新启动应用");
-      notifyUI({ type: "error", data: "采集进程异常，请退出后重新启动应用" });
-      for (const p of pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(new Error("采集进程异常"));
-      }
-      pending.clear();
     });
     win = new BrowserWindow({
       width: 1380,
@@ -263,7 +229,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
     stopQueries();
     pendingShutdown=true;
-    request("shutdown").catch(()=>{}).finally(()=>{databaseClosed=true;app.quit();});
+    worker.shutdown().catch(()=>{}).finally(()=>{databaseClosed=true;app.quit();});
   });
   app.on("window-all-closed", () => {});
 }

@@ -23,6 +23,7 @@ import {
   CaretRight,
 } from "@phosphor-icons/react";
 import "./style.css";
+import { createRefresh } from "./refresh.mjs";
 
 const api = window.monitor;
 const compact = (n) =>
@@ -304,44 +305,35 @@ function App() {
     [toast, setToast] = useState(""),
     [progress, setProgress] = useState(null),
     [quotaKey, setQuotaKey] = useState(""),
-    [view, setView] = useState("models");
-  const sequence = useRef(0);
-  async function load() {
-    if (!api) return;
-    const seq = ++sequence.current;
-    try {
-      const next = await api.snapshot(filter);
-      if (seq === sequence.current) {
-        setData(next);
-        setError("");
-        setProgress(null);
-      }
-    } catch (e) {
-      if (seq === sequence.current) setError(e.message);
-    }
-  }
+    [view, setView] = useState("models"),
+    [recordPage,setRecordPage] = useState(1),
+    [expanded,setExpanded] = useState(null);
+  const requestFilter = useRef(null);
+  requestFilter.current = {...filter,page,recordPage,pageSize:50};
+  const refresh = useRef(null);
+  if(!refresh.current) refresh.current=createRefresh(
+    value=>api.snapshot(value),
+    next=>{setData(next);setError('');setProgress(null);},
+    e=>setError(e.message),
+  );
+  function load() { if(api) return refresh.current.request(requestFilter.current); }
+  useEffect(() => {
+    setRecordPage(1); setExpanded(null);
+  },[JSON.stringify(filter)]);
   useEffect(() => {
     load();
-    const timer = setInterval(() => {
-      if (!document.hidden) load();
-    }, 3000);
-    const wake = () => {
-      if (!document.hidden) load();
-    };
-    document.addEventListener("visibilitychange", wake);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", wake);
-    };
-  }, [JSON.stringify(filter)]);
-  useEffect(
-    () =>
-      api?.onUpdate((msg) => {
-        if (msg?.type === "progress") setProgress(msg.data);
-        if (msg?.type === "error") setError(msg.data);
-      }),
-    [],
-  );
+  }, [JSON.stringify(filter),page,recordPage]);
+  useEffect(() => {
+    const timer=setInterval(()=>{if(!document.hidden)load();},30000);
+    const wake=()=>{if(!document.hidden)load();};
+    document.addEventListener('visibilitychange',wake);
+    const off=api?.onUpdate(msg=>{
+      if(msg?.type==='progress')setProgress(msg.data);
+      if(msg?.type==='error')setError(msg.data);
+      if((!msg || ['updated','recovered'].includes(msg.type))&&!document.hidden)load();
+    });
+    return ()=>{clearInterval(timer);off?.();document.removeEventListener('visibilitychange',wake);};
+  },[]);
   useEffect(() => {
     document.documentElement.dataset.theme = data?.settings.theme || "system";
   }, [data?.settings.theme]);
@@ -892,7 +884,7 @@ function App() {
                     </div>
                   </Panel>
                   {page === "history" && (
-                    <Panel title="任务运行记录" meta="最近 200 条">
+                    <Panel title="任务运行记录" meta={`共 ${data.records?.total || 0} 条`}>
                       <div className="table-scroll">
                         <table className="run-records">
                           <thead>
@@ -909,7 +901,7 @@ function App() {
                           </thead>
                           <tbody>
                             {data.turns.map((t) => (
-                              <tr key={t.id}>
+                              <React.Fragment key={t.id}><tr>
                                 <td title={t.id}>
                                   {date(t.started)}
                                   <small>
@@ -917,7 +909,9 @@ function App() {
                                     {shortPath(t.project)}
                                   </small>
                                 </td>
-                                <td>{t.model}</td>
+                                <td><button className="record-detail" onClick={()=>setExpanded(expanded===t.id?null:t.id)} aria-expanded={expanded===t.id}>
+                                  {t.models?.length>1 ? `${t.models.length} 个模型` : (t.models?.[0]?.model || t.model)}<small>{expanded===t.id?'收起明细':'查看明细'}</small>
+                                </button></td>
                                 <td>
                                   {
                                     {
@@ -934,9 +928,23 @@ function App() {
                                 <td>{duration(t.duration)}</td>
                                 <td>{duration(t.ttft)}</td>
                               </tr>
+                              {expanded===t.id && <tr className="record-expanded"><td colSpan={8}>
+                                <div>完整任务 · {t.id}</div>
+                                <div className="model-details">{t.models?.map(m=><div key={m.model}>
+                                  <strong>{m.model}</strong><span>输入 {full(m.input)} · 缓存 {full(m.cached)} · 输出 {full(m.output)}</span>
+                                  <span>输入 {recordMoney(m.inputCost,m)} · 输出 {recordMoney(m.outputCost,m)} · 合计 {recordMoney(m.cost,m)}</span>
+                                </div>)}</div>
+                                {!t.models?.length && <span>暂无用量记录</span>}
+                              </td></tr>}
+                              </React.Fragment>
                             ))}
                           </tbody>
                         </table>
+                      </div>
+                      <div className="pagination">
+                        <button className="button" disabled={!data.records || data.records.page<=1} onClick={()=>{setRecordPage(data.records.page-1);setExpanded(null);}}>上一页</button>
+                        <span>第 {data.records?.page || 1} / {data.records?.pages || 1} 页 · 每页 50 条</span>
+                        <button className="button" disabled={!data.records || data.records.page>=data.records.pages} onClick={()=>{setRecordPage(data.records.page+1);setExpanded(null);}}>下一页</button>
                       </div>
                     </Panel>
                   )}
@@ -958,7 +966,7 @@ function App() {
                       </Panel>
                     ))}
                   </div>
-                  <Panel title="剩余额度历史">
+                  <Panel title="剩余额度历史" meta={data.quotaHistorySamples>data.quotaHistory.length ? "已保留采样端点与峰谷" : undefined}>
                     <select
                       aria-label="额度窗口"
                       value={
