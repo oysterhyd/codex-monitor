@@ -2,14 +2,14 @@
 html.widget-mode, .widget-mode body, .widget-mode #root { background: transparent !important; width:100%; height:100%; overflow:hidden; margin:0; }
 .widget-mode body { color:#10243f; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI Variable','Segoe UI','Microsoft YaHei UI',sans-serif; }
 .widget-mode body::before,.widget-mode body::after { display:none; }
-.desktop-widget { --widget-muted:#506783; --ease:cubic-bezier(.22,1,.36,1); position:relative; margin:12px; width:536px; height:356px; border-radius:30px; isolation:isolate; user-select:none; opacity:0; transform:translateY(14px) scale(.96); transition:width 680ms var(--ease),height 680ms var(--ease),border-radius 680ms var(--ease),opacity 240ms ease,transform 460ms var(--ease); }
+.desktop-widget { --widget-muted:#506783; --ease:cubic-bezier(.22,1,.36,1); position:absolute; top:12px; right:12px; margin:0; width:536px; height:356px; border-radius:30px; isolation:isolate; user-select:none; opacity:0; transform:translateY(14px) scale(.96); transition:width 680ms var(--ease),height 680ms var(--ease),border-radius 680ms var(--ease),opacity 240ms ease,transform 460ms var(--ease); }
 .desktop-widget::before { content:''; position:absolute; inset:0; border-radius:inherit; border:1px solid #ffffffde; background:radial-gradient(ellipse at 0 0,#c2f6ffa1,transparent 60%),radial-gradient(ellipse at 100% 15%,#d9ccf59c,transparent 65%),linear-gradient(135deg,#eff7ffe8,#dbe9f6d9); box-shadow:inset 0 2px 2px #fff,inset 0 -2px 4px #95b6d344,0 5px 11px #19335730; backdrop-filter:blur(24px) saturate(165%); pointer-events:none; }
 .desktop-widget.widget-in { opacity:1; transform:none; }
 .desktop-widget.widget-out { opacity:0; transform:translateY(7px) scale(.975); }
 .desktop-widget button { color:inherit; -webkit-app-region:no-drag; cursor:pointer; transition:background 180ms,transform 250ms var(--ease),box-shadow 250ms; }
 .desktop-widget button:focus-visible,.widget-metric:focus-visible { outline:2px solid #008d88; outline-offset:3px; }
 .desktop-widget button:active { transform:scale(.94); }
-.widget-content { position:absolute; inset:0; width:536px; height:356px; padding:18px; transform-origin:60px 60px; transition:opacity 240ms ease 180ms,transform 650ms var(--ease),filter 360ms ease; }
+.widget-content { position:absolute; top:0; right:0; width:536px; height:356px; padding:18px; transform-origin:476px 60px; transition:opacity 240ms ease 180ms,transform 650ms var(--ease),filter 360ms ease; }
 .widget-mode .widget-header { position:static; border:0; background:transparent; }
 .widget-header { display:flex; align-items:center; gap:10px; height:45px; -webkit-app-region:drag; }
 .widget-brand { padding:0; width:40px; height:40px; background:transparent; border-radius:13px; flex-shrink:0; }
@@ -65,7 +65,7 @@ html.widget-mode, .widget-mode body, .widget-mode #root { background: transparen
 @keyframes widget-spin { to { transform:rotate(360deg); } }
 .desktop-widget.is-orb { width:120px; height:120px; border-radius:60px; }
 .is-orb .widget-content { opacity:0; transform:scale(.28); filter:blur(7px); transition:opacity 170ms ease,transform 650ms var(--ease),filter 300ms ease; pointer-events:none; }
-.widget-orb { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; width:120px; height:120px; padding:0; border:0; border-radius:50%; overflow:hidden; background:transparent; opacity:0; transform:scale(.65); pointer-events:none; transition:opacity 180ms ease,transform 420ms var(--ease) !important; }
+.widget-orb { position:absolute; top:0; right:0; touch-action:none; display:flex; flex-direction:column; align-items:center; justify-content:center; width:120px; height:120px; padding:0; border:0; border-radius:50%; overflow:hidden; background:transparent; opacity:0; transform:scale(.65); pointer-events:none; transition:opacity 180ms ease,transform 420ms var(--ease) !important; }
 .is-orb .widget-orb { opacity:1; transform:scale(1); pointer-events:auto; transition-delay:220ms !important; }
 .widget-orb:hover { box-shadow:inset 0 0 20px #fff9,0 0 10px #90e7de60; }
 .orb-glint { position:absolute; inset:4px; border-radius:50%; border:1px solid #ffffffb3; background:radial-gradient(ellipse at 30% 8%,#ffffffc9,transparent 50%),radial-gradient(ellipse at 80% 95%,#9fdfdb66,transparent 55%); pointer-events:none; }
@@ -77,3 +77,6 @@ html.widget-mode, .widget-mode body, .widget-mode #root { background: transparen
 .orb-status i { width:4px; height:4px; }
 @media (prefers-reduced-motion:reduce) { .desktop-widget,.desktop-widget *,.desktop-widget::before { animation:none !important; transition:none !important; } .widget-metric:hover,.widget-metric:active { transform:none; } }
 @media (prefers-reduced-transparency:reduce) { .desktop-widget::before { background:#e4edf8; backdrop-filter:none; } .widget-metric,.widget-bottom { background:#f1f6fc; } }
+
+.desktop-widget .widget-orb { cursor:grab; }
+.desktop-widget .widget-orb:active { cursor:grabbing; }

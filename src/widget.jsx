@@ -28,6 +28,26 @@ export function Widget() {
   const [collapsed, setCollapsed] = useState(false);
   const [visible, setVisible] = useState(false);
   const morphing = useRef(false), orb = useRef(null), menu = useRef(null);
+  const drag = useRef(null), suppressClick = useRef(false);
+  const sendDrag = (phase, event) => window.widget.drag({ phase, x: event.screenX, y: event.screenY }).catch(e => setError(e.message));
+  const beginDrag = event => {
+    if (event.button !== 0 || morphing.current) return;
+    suppressClick.current = false;
+    drag.current = { x: event.screenX, y: event.screenY };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    sendDrag('start', event);
+  };
+  const moveDrag = event => {
+    if (!drag.current) return;
+    if (Math.hypot(event.screenX - drag.current.x, event.screenY - drag.current.y) > 5) suppressClick.current = true;
+    if (suppressClick.current) sendDrag('move', event);
+  };
+  const endDrag = event => {
+    if (!drag.current) return;
+    sendDrag('end', event);
+    drag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
   const toggle = async () => {
     if (morphing.current) return;
     morphing.current = true;
@@ -116,7 +136,9 @@ export function Widget() {
     <footer className="widget-footer"><span title={error || t('本机采集更新时间；额度采样时间见指标提示', 'Local collection time; hover quotas for their sample times')}><Clock size={21} />{error ? t('连接中断 · 自动重试', 'Disconnected · retrying') : `${t('最后更新：', 'Updated: ')}${data?.scan?.lastScan ? new Date(data.scan.lastScan).toLocaleString(en ? 'en-GB' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '—'}`}</span>
       <button onClick={refresh} disabled={busy} title={t('立即刷新采集与额度', 'Refresh usage and quota now')}><ArrowClockwise size={21} className={busy ? 'spinning' : ''} />{busy ? t('刷新中', 'Refreshing') : t('自动刷新中', 'Auto-refreshing')}</button></footer>
     </div>
-    <button ref={orb} className="widget-orb" inert={!collapsed} aria-hidden={!collapsed} aria-label={t(`今日 Token ${compact(data?.total)}，单击展开`, `Today ${compact(data?.total)} tokens, click to expand`)} aria-expanded={!collapsed} onClick={toggle}>
+    <button ref={orb} className="widget-orb" inert={!collapsed} aria-hidden={!collapsed} aria-label={t(`今日 Token ${compact(data?.total)}，单击展开`, `Today ${compact(data?.total)} tokens, click to expand`)} aria-expanded={!collapsed}
+      onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
+      onClick={event => { if (event.detail === 0 || !suppressClick.current) toggle(); suppressClick.current = false; }}>
       <span className="orb-glint" aria-hidden="true" />
       <Cube size={19} className="orb-icon" />
       <span className="orb-label">{t('今日 Token', 'Today’s tokens')}</span>

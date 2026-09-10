@@ -7,11 +7,12 @@ function createWidget({ data, restore, refresh }) {
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
   const width = 560, height = 380;
+  let currentWidth = width, currentHeight = height, drag = null;
   const position = () => {
     const area = Number.isFinite(saved.x) && Number.isFinite(saved.y)
       ? screen.getDisplayNearestPoint({ x: saved.x, y: saved.y }).workArea : screen.getPrimaryDisplay().workArea;
-    return { x: Math.round(Math.max(area.x, Math.min(saved.x ?? area.x + area.width - width - 24, area.x + area.width - width))),
-      y: Math.round(Math.max(area.y, Math.min(saved.y ?? area.y + 48, area.y + area.height - height))) };
+    return { x: Math.round(Math.max(area.x, Math.min(saved.x ?? area.x + area.width - currentWidth - 24, area.x + area.width - currentWidth))),
+      y: Math.round(Math.max(area.y, Math.min(saved.y ?? area.y + 48, area.y + area.height - currentHeight))) };
   };
   const window = new BrowserWindow({ ...position(), width, height, frame: false, transparent: true,
     backgroundColor: '#00000000', hasShadow: false, resizable: false, maximizable: false, fullscreenable: false,
@@ -54,9 +55,21 @@ function createWidget({ data, restore, refresh }) {
     const bounds = window.getBounds();
     const area = screen.getDisplayMatching(bounds).workArea;
     const h = compact === true ? 144 : height;
-    window.setBounds({ x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - size)),
+    currentWidth = size; currentHeight = h;
+    window.setBounds({ x: Math.max(area.x, Math.min(bounds.x + bounds.width - size, area.x + area.width - size)),
       y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - h)), width: size, height: h });
     persist();
+  }, drag(payload) {
+    if (!payload || !Number.isFinite(payload.x) || !Number.isFinite(payload.y)) return;
+    if (payload.phase === 'start') { drag = { x: payload.x, y: payload.y, bounds: window.getBounds() }; return; }
+    if (!drag) return;
+    if (payload.phase === 'move') {
+      const x = Math.round(drag.bounds.x + payload.x - drag.x), y = Math.round(drag.bounds.y + payload.y - drag.y);
+      const area = screen.getDisplayNearestPoint({ x, y }).workArea;
+      window.setPosition(Math.max(area.x, Math.min(x, area.x + area.width - currentWidth)),
+        Math.max(area.y, Math.min(y, area.y + area.height - currentHeight)));
+    }
+    if (payload.phase === 'end') { drag = null; persist(); }
   }, menu() {
     Menu.buildFromTemplate([
       { label: '打开主窗口 / Open monitor', click: restore },
