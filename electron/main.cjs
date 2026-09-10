@@ -252,10 +252,10 @@ if (!app.requestSingleInstanceLock()) {
     widget = createWidget({ data, restore: restoreMain, refresh: () => request("refresh").catch(() => {}) });
     if (widgetMode) widget.show();
     for (const [name, fn] of Object.entries({ snapshot: () => request("widget"), restore: restoreMain,
-      menu: () => widget.menu(), refresh: () => request("refresh") })) {
-      ipcMain.handle(`widget:${name}`, event => {
+      menu: () => widget.menu(), resize: compact => widget.resize(compact), refresh: () => request("refresh") })) {
+      ipcMain.handle(`widget:${name}`, (event, arg) => {
         if (event.sender !== widget.window.webContents) throw new Error(tr("无效来源"));
-        return fn();
+        return fn(arg);
       });
     }
     request("snapshot", {})

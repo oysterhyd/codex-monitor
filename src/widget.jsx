@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Target, Stack, Lightning, Coins, Cube, Clock, ArrowClockwise, DotsThree, ArrowUpRight } from '@phosphor-icons/react';
 import icon from '../assets/monitor-glass.png';
 import { createRefresh } from './refresh.mjs';
@@ -25,6 +25,34 @@ function Sparkline({ points = [], large = false, english }) {
 }
 
 export function Widget() {
+  const [collapsed, setCollapsed] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const morphing = useRef(false), orb = useRef(null), menu = useRef(null);
+  const toggle = async () => {
+    if (morphing.current) return;
+    morphing.current = true;
+    try {
+      if (collapsed) {
+        await window.widget.resize(false);
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
+      const next = !collapsed;
+      setCollapsed(next);
+      await new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 40 : 720));
+      if (next) await window.widget.resize(true);
+      (next ? orb : menu).current?.focus({ preventScroll: true });
+    } catch (e) { setError(e.message); }
+    finally { morphing.current = false; }
+  };
+  const light = event => {
+    const el = event.currentTarget, rect = el.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width, y = (event.clientY - rect.top) / rect.height;
+    el.style.setProperty('--light-x', `${x * 100}%`);
+    el.style.setProperty('--light-y', `${y * 100}%`);
+    el.style.setProperty('--tilt-x', `${(0.5 - y) * 5}deg`);
+    el.style.setProperty('--tilt-y', `${(x - 0.5) * 5}deg`);
+  };
+  const resetLight = event => { event.currentTarget.style.setProperty('--tilt-x', '0deg'); event.currentTarget.style.setProperty('--tilt-y', '0deg'); };
   const [data, setData] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   useEffect(() => {
     document.documentElement.classList.add('widget-mode');
@@ -34,17 +62,8 @@ export function Widget() {
     update();
     const timer = setInterval(update, 3000);
     const unsubscribe = window.widget.onUpdate(update);
-    const node = () => document.querySelector('.desktop-widget');
-    const enterFx = () => {
-      const el = node(); if (!el) return;
-      el.classList.remove('widget-out');
-      requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('widget-in')));
-    };
-    const exitFx = () => {
-      const el = node(); if (!el) return;
-      el.classList.remove('widget-in');
-      el.classList.add('widget-out');
-    };
+    const enterFx = () => requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
+    const exitFx = () => setVisible(false);
     document.addEventListener('visibilitychange', update);
     const offExit = window.widget.onExit(exitFx);
     const offEnter = window.widget.onEnter(enterFx);
@@ -75,19 +94,20 @@ export function Widget() {
     { label: t('实时 TPS', 'Live TPS'), icon: Lightning, value: data && collecting ? data.tps : null, speed: true, title: t('最近 60 秒日志中的输出 token / 60；包含等待，并非精确生成速度。', 'Output tokens recorded in the last 60 seconds / 60; includes idle time, not exact generation speed.') },
     { label: t('缓存命中率', 'Cache hit rate'), icon: Coins, value: data?.cacheRate == null ? null : data.cacheRate * 100, title: t('当前账号今日缓存输入 / 输入 Token', 'Current account: cached input / input tokens today') },
   ];
-  return <main className="desktop-widget" aria-label={t('Codex 桌面小组件', 'Codex desktop widget')}>
+  return <main className={`desktop-widget ${visible ? 'widget-in' : 'widget-out'} ${collapsed ? 'is-orb' : ''}`} onContextMenu={event => { event.preventDefault(); window.widget.menu(); }} aria-label={t('Codex 桌面小组件', 'Codex desktop widget')}>
+    <div className="widget-content" inert={collapsed} aria-hidden={collapsed}>
     <header className="widget-header" onDoubleClick={() => window.widget.restore()}>
       <button className="widget-brand" onClick={() => window.widget.restore()} title={t('打开主窗口', 'Open monitor')}><img src={icon} alt="" /></button>
       <div className="widget-title"><h1>Codex Monitor</h1><p>{t('实时监控 · ', 'Live monitoring · ')}{collecting ? t('稳定运行中', 'Running') : data ? t('等待采集更新', 'Waiting for updates') : t('正在连接', 'Connecting')}</p></div>
       <span className={`widget-status ${collecting ? '' : 'waiting'}`} role="status"><i />{collecting ? t('采集中', 'Live') : t('等待中', 'Waiting')}</span>
-      <button className="widget-menu" aria-label={t('小组件选项', 'Widget options')} onClick={() => window.widget.menu()}><DotsThree size={26} weight="bold" /></button>
+      <button ref={menu} className="widget-menu" aria-label={t('收起为 Token 圆球', 'Collapse to token orb')} title={t('收起为圆球 · 右键打开选项', 'Collapse to orb · Right-click for options')} aria-expanded={!collapsed} onClick={toggle}><DotsThree size={26} weight="bold" /></button>
     </header>
-    <div className="widget-metrics">{cards.map(({ label, icon: Icon, value, title, speed }) => <section className="widget-metric" key={label} title={title}>
+    <div className="widget-metrics">{cards.map(({ label, icon: Icon, value, title, speed }) => <section className="widget-metric" key={label} title={title} tabIndex={0} onPointerMove={light} onPointerLeave={resetLight}>
       <div className="widget-metric-label"><span className={`widget-icon ${speed ? 'blue' : ''}`}><Icon size={23} /></span><span>{label}</span></div>
       <div className="widget-value">{speed ? value == null ? '—' : value.toFixed(1) : percent(value)}{speed && <small>tok/s</small>}</div>
       {speed ? <Sparkline points={data?.speed} english={en} /> : <div className="widget-bar" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value ?? undefined}><span style={{ width: `${value ?? 0}%` }} /></div>}
     </section>)}</div>
-    <section className="widget-bottom">
+    <section className="widget-bottom" onPointerMove={light} onPointerLeave={resetLight}>
       <div className="widget-today"><div className="widget-today-label"><span className="widget-icon"><Cube size={25} /></span>{t('今日 Token', 'Today’s tokens')}</div>
         <strong>{compact(data?.total)}</strong><p>{data?.change == null ? t('较昨日 —', 'vs yest. —') : <>{t('较昨日 ', 'vs yest. ')}{data.change >= 0 ? '+' : ''}{(data.change * 100).toFixed(1)}% <ArrowUpRight size={17} style={{ transform: data.change < 0 ? 'rotate(90deg)' : undefined }} /></>}</p>
       </div>
@@ -95,5 +115,13 @@ export function Widget() {
     </section>
     <footer className="widget-footer"><span title={error || t('本机采集更新时间；额度采样时间见指标提示', 'Local collection time; hover quotas for their sample times')}><Clock size={21} />{error ? t('连接中断 · 自动重试', 'Disconnected · retrying') : `${t('最后更新：', 'Updated: ')}${data?.scan?.lastScan ? new Date(data.scan.lastScan).toLocaleString(en ? 'en-GB' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '—'}`}</span>
       <button onClick={refresh} disabled={busy} title={t('立即刷新采集与额度', 'Refresh usage and quota now')}><ArrowClockwise size={21} className={busy ? 'spinning' : ''} />{busy ? t('刷新中', 'Refreshing') : t('自动刷新中', 'Auto-refreshing')}</button></footer>
+    </div>
+    <button ref={orb} className="widget-orb" inert={!collapsed} aria-hidden={!collapsed} aria-label={t(`今日 Token ${compact(data?.total)}，单击展开`, `Today ${compact(data?.total)} tokens, click to expand`)} aria-expanded={!collapsed} onClick={toggle}>
+      <span className="orb-glint" aria-hidden="true" />
+      <Cube size={19} className="orb-icon" />
+      <span className="orb-label">{t('今日 Token', 'Today’s tokens')}</span>
+      <strong>{compact(data?.total)}</strong>
+      <span className={`orb-status ${collecting ? '' : 'waiting'}`}><i />{collecting ? t('实时', 'Live') : t('等待中', 'Waiting')}</span>
+    </button>
   </main>;
 }

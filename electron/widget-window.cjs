@@ -6,7 +6,7 @@ function createWidget({ data, restore, refresh }) {
   const file = path.join(data, 'widget-window.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-  const width = 360, height = 260;
+  const width = 560, height = 380;
   const position = () => {
     const area = Number.isFinite(saved.x) && Number.isFinite(saved.y)
       ? screen.getDisplayNearestPoint({ x: saved.x, y: saved.y }).workArea : screen.getPrimaryDisplay().workArea;
@@ -49,7 +49,15 @@ function createWidget({ data, restore, refresh }) {
   screen.on('display-metrics-changed', reposition);
   window.on('closed', () => { screen.removeListener('display-removed', reposition); screen.removeListener('display-metrics-changed', reposition); });
   window.loadFile(path.join(__dirname, '../dist/index.html'), { query: { widget: '1' } });
-  return { window, show, hide, menu() {
+  return { window, show, hide, resize(compact) {
+    const size = compact === true ? 144 : width;
+    const bounds = window.getBounds();
+    const area = screen.getDisplayMatching(bounds).workArea;
+    const h = compact === true ? 144 : height;
+    window.setBounds({ x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - size)),
+      y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - h)), width: size, height: h });
+    persist();
+  }, menu() {
     Menu.buildFromTemplate([
       { label: '打开主窗口 / Open monitor', click: restore },
       { label: '置顶 / Always on top', type: 'checkbox', checked: window.isAlwaysOnTop(), click: item => { window.setAlwaysOnTop(item.checked); persist(); } },

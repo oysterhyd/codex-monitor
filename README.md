@@ -40,6 +40,8 @@ Current-account 5h and weekly quota windows: remaining percentage, reset time, u
 Instant Chinese/English switching, system-following light/dark theme, launch at sign-in, quota alerts and query interval, data locations, model price versions (manual edits always add a new version), and account management.
 
 ### Desktop widget
+- Left-click the top-right dots to smoothly collapse the 560×380 card into a today-token orb; click the orb to expand. Right-click opens options.
+- Pointer-following highlights, gentle card tilt, hover elevation, and press feedback bring the glass surface to life.
 - A top-bar switch toggles between the main window and the glass desktop card; the tray menu offers the same checkbox.
 - The card shows 5h / weekly remaining quota, live TPS, cache hit rate, today's tokens, and a 24-hour usage trend.
 - Pinned above other windows by default; unpin from the card menu at any time.
