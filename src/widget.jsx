@@ -97,6 +97,19 @@ export function Widget() {
     update();
     const timer = setInterval(update, 3000);
     const unsubscribe = window.widget.onUpdate(update);
+    // Pass-through steering: the cursor outside the glass lets desktop clicks
+    // through; a forwarded move re-enables input when it re-enters the card.
+    let lastHover = 0;
+    const hitTest = event => {
+      const now = performance.now();
+      if (now - lastHover < 40 || drag.current) return;
+      lastHover = now;
+      const rect = document.querySelector('.desktop-widget')?.getBoundingClientRect();
+      if (!rect) return;
+      const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+      window.widget.hover(inside || !!drag.current);
+    };
+    document.addEventListener('pointermove', hitTest);
     // Dropping the pointer capture mid-drag (transparent windows lose it on every
     // SetWindowPos) can land the release outside the orb — clamp + fast cursor does
     // exactly that. A document-level fallback ends the gesture wherever it lands.
@@ -110,6 +123,7 @@ export function Widget() {
     const offEnter = window.widget.onEnter(enterFx);
     return () => { alive = false; clearInterval(timer); unsubscribe(); offExit(); offEnter();
       document.removeEventListener('visibilitychange', update);
+      document.removeEventListener('pointermove', hitTest);
       document.removeEventListener('pointerup', strayEnd, true); document.removeEventListener('pointercancel', strayEnd, true); };
   }, []);
   const en = data?.language === 'en', t = (zh, english) => en ? english : zh;

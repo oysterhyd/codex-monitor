@@ -11,6 +11,10 @@ function createWidget({ data, restore, refresh }) {
   const file = path.join(data, 'widget-window.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  // Legacy profiles carry topmost:false inherited from the old pinned:false
+  // default, so the widget silently stopped floating. Adopt on-top once and
+  // record the choice; later menu toggles (topmostChoice) are respected.
+  if (saved.topmost === false && saved.topmostChoice !== true) saved.topmost = true;
   let drag = null;
   const clampOrb = (x, y, area) => ({
     // Keep a 48px grab handle of the orb visible; the (transparent) window may
@@ -33,14 +37,13 @@ function createWidget({ data, restore, refresh }) {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', e => e.preventDefault());
   const persist = () => {
-    saved = { ...window.getBounds(), topmost: window.isAlwaysOnTop(), mode: saved.mode === true };
+    saved = { ...window.getBounds(), topmost: window.isAlwaysOnTop(), topmostChoice: true, mode: saved.mode === true };
     try { fs.writeFileSync(file, JSON.stringify(saved)); } catch {}
   };
   const enter = () => {
     const p = position();
     window.setBounds({ ...p, width: CARD_W, height: CARD_H });
     window.showInactive();
-    window.setIgnoreMouseEvents(true, { forward: true });
     window.setSkipTaskbar(false);
     window.webContents.send('widget:enter');
   };
