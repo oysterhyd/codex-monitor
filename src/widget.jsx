@@ -28,23 +28,27 @@ export function Widget() {
   const [collapsed, setCollapsed] = useState(false);
   const [visible, setVisible] = useState(false);
   const morphing = useRef(false), orb = useRef(null), menu = useRef(null);
-  const drag = useRef(null), suppressClick = useRef(false);
-  const sendDrag = (phase, event) => window.widget.drag({ phase, x: event.screenX, y: event.screenY }).catch(e => setError(e.message));
+  const drag = useRef(null), suppressClick = useRef(false), dragResult = useRef(Promise.resolve());
+  const sendDrag = phase => {
+    dragResult.current = window.widget.drag({ phase }).then(moved => { suppressClick.current ||= moved; })
+      .catch(e => { suppressClick.current = true; setError(e.message); });
+  };
   const beginDrag = event => {
     if (event.button !== 0 || morphing.current) return;
     suppressClick.current = false;
-    drag.current = { x: event.screenX, y: event.screenY };
+    drag.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
-    sendDrag('start', event);
+    sendDrag('start');
   };
   const moveDrag = event => {
     if (!drag.current) return;
-    if (Math.hypot(event.screenX - drag.current.x, event.screenY - drag.current.y) > 5) suppressClick.current = true;
-    if (suppressClick.current) sendDrag('move', event);
+    sendDrag('move');
   };
   const endDrag = event => {
     if (!drag.current) return;
-    sendDrag('end', event);
+    const cancelled = event.type !== 'pointerup';
+    if (cancelled) suppressClick.current = true;
+    sendDrag(cancelled ? 'cancel' : 'end');
     drag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
@@ -138,7 +142,7 @@ export function Widget() {
     </div>
     <button ref={orb} className="widget-orb" inert={!collapsed} aria-hidden={!collapsed} aria-label={t(`今日 Token ${compact(data?.total)}，单击展开`, `Today ${compact(data?.total)} tokens, click to expand`)} aria-expanded={!collapsed}
       onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
-      onClick={event => { if (event.detail === 0 || !suppressClick.current) toggle(); suppressClick.current = false; }}>
+      onClick={async event => { const keyboard = event.detail === 0; await dragResult.current; if (keyboard || !suppressClick.current) toggle(); suppressClick.current = false; }}>
       <span className="orb-glint" aria-hidden="true" />
       <Cube size={19} className="orb-icon" />
       <span className="orb-label">{t('今日 Token', 'Today’s tokens')}</span>

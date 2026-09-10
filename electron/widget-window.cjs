@@ -60,16 +60,23 @@ function createWidget({ data, restore, refresh }) {
       y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - h)), width: size, height: h });
     persist();
   }, drag(payload) {
-    if (!payload || !Number.isFinite(payload.x) || !Number.isFinite(payload.y)) return;
-    if (payload.phase === 'start') { drag = { x: payload.x, y: payload.y, bounds: window.getBounds() }; return; }
-    if (!drag) return;
-    if (payload.phase === 'move') {
-      const x = Math.round(drag.bounds.x + payload.x - drag.x), y = Math.round(drag.bounds.y + payload.y - drag.y);
+    if (!payload || !['start', 'move', 'end', 'cancel'].includes(payload.phase)) return false;
+    // Browser screenX/Y can change as a transparent window moves on mixed-DPI
+    // Windows desktops. Use OS cursor coordinates in the same DIP space as bounds.
+    const cursor = screen.getCursorScreenPoint();
+    if (payload.phase === 'start') { drag = { ...cursor, bounds: window.getBounds(), moved: false }; return false; }
+    if (!drag) return false;
+    if (payload.phase !== 'cancel') {
+      const dx = cursor.x - drag.x, dy = cursor.y - drag.y;
+      drag.moved ||= Math.hypot(dx, dy) > 5;
+      const x = Math.round(drag.bounds.x + dx), y = Math.round(drag.bounds.y + dy);
       const area = screen.getDisplayNearestPoint({ x, y }).workArea;
-      window.setPosition(Math.max(area.x, Math.min(x, area.x + area.width - currentWidth)),
+      if (drag.moved) window.setPosition(Math.max(area.x, Math.min(x, area.x + area.width - currentWidth)),
         Math.max(area.y, Math.min(y, area.y + area.height - currentHeight)));
     }
-    if (payload.phase === 'end') { drag = null; persist(); }
+    const moved = drag.moved;
+    if (payload.phase === 'end' || payload.phase === 'cancel') { drag = null; persist(); }
+    return moved;
   }, menu() {
     Menu.buildFromTemplate([
       { label: '打开主窗口 / Open monitor', click: restore },
