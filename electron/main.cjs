@@ -39,6 +39,7 @@ if (!app.requestSingleInstanceLock()) {
   }
   function setWidgetMode(on) {
     widgetMode = !!on;
+    win.webContents.send("widget:mode", widgetMode);
     if (widgetMode) {
       win.hide();
       widget?.show();
@@ -207,7 +208,7 @@ if (!app.requestSingleInstanceLock()) {
       return settings;
     });
     handle("account", value => request("account", value));
-    handle("widgetMode", (on) => { setWidgetMode(on); return widgetMode; });
+    handle("widgetMode", (on) => { if (typeof on === 'boolean') setWidgetMode(on); return widgetMode; });
     handle("assignAccount", async value => {
       const result = await dialog.showMessageBox(win, { type: "question", title: tr("历史账号归属"), message: value.turn ? tr("将此任务的全部用量记录归属到所选账号？此操作不修改额度快照。") : tr("将当前时间范围内全部未归属记录指定给所选账号？"), buttons: [tr("取消"), tr("确认归属")], defaultId: 0, cancelId: 0 });
       return result.response === 1 ? request("assignAccount", value) : null;

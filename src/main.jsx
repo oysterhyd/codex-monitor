@@ -311,6 +311,14 @@ function Rank({ rows, type, onSelect }) {
 }
 
 function App() {
+  const [widgetMode, setWidgetMode] = useState(false), [widgetPending, setWidgetPending] = useState(false);
+  useEffect(() => {
+    if (!api) return;
+    let alive = true, changed = false;
+    const unsubscribe = api.onWidgetMode(on => { changed = true; setWidgetMode(on); });
+    api.widgetMode().then(on => { if (alive && !changed) setWidgetMode(on); }).catch(e => { if (alive) setError(e.message); });
+    return () => { alive = false; unsubscribe(); };
+  }, []);
   const [page, setPage] = useState("overview"),
     [data, setData] = useState(null),
     [filter, setFilter] = useState({ range: "today" }),
@@ -373,12 +381,19 @@ function App() {
     }
   };
   const choose = (key, value) => setFilter((f) => ({ ...f, [key]: value }));
-  const enterWidgetMode = () => {
+  const enterWidgetMode = async event => {
+    const on = event.target.checked;
+    if (widgetPending) return;
+    setWidgetPending(true);
     const appEl = document.querySelector('.app');
-    if (appEl) {
-      appEl.classList.add('app-to-widget');
-      setTimeout(() => api.widgetMode(true).catch(() => appEl.classList.remove('app-to-widget')), 180);
-    } else api.widgetMode(true);
+    try {
+      if (on && appEl) {
+        appEl.classList.add('app-to-widget');
+        await new Promise(resolve => setTimeout(resolve, 180));
+      }
+      await api.widgetMode(on);
+    } catch (e) { appEl?.classList.remove('app-to-widget'); setError(e.message); }
+    finally { setWidgetPending(false); }
   };
   const nav = [
     ["overview", Activity, tr("总览")],
@@ -423,7 +438,7 @@ function App() {
           <div className="header-actions">
             <label className="widget-switch" title={tr("切换到桌面小组件模式")}>
               <span className="widget-switch-label"><FrameCorners size={15} aria-hidden="true" />{tr("小组件")}</span>
-              <input type="checkbox" role="switch" aria-label={tr("桌面小组件模式")} disabled={!api || busy} onChange={enterWidgetMode} />
+              <input type="checkbox" role="switch" aria-label={tr("桌面小组件模式")} checked={widgetMode} disabled={!api || busy || widgetPending} onChange={enterWidgetMode} />
             </label>
             {data?.settings.muted && <BellSlash size={16} />}
             <span className="status-pill">

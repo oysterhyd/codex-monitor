@@ -1,6 +1,6 @@
 {
   "name": "codex-monitor",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "Local Windows Codex desktop usage monitor",
   "private": true,
   "author": "Codex Monitor",
