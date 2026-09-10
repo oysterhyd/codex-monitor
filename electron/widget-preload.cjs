@@ -3,7 +3,8 @@ contextBridge.exposeInMainWorld('widget', {
   snapshot: () => ipcRenderer.invoke('widget:snapshot'),
   restore: () => ipcRenderer.invoke('widget:restore'),
   menu: () => ipcRenderer.invoke('widget:menu'),
-  resize: compact => ipcRenderer.invoke('widget:resize', compact),
+  anchor: () => ipcRenderer.invoke('widget:anchor'),
+  hover: hit => ipcRenderer.invoke('widget:hover', hit),
   drag: payload => ipcRenderer.invoke('widget:drag', payload),
   refresh: () => ipcRenderer.invoke('widget:refresh'),
   onUpdate: callback => {

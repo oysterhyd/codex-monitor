@@ -28,45 +28,54 @@ export function Widget() {
   const [collapsed, setCollapsed] = useState(false);
   const [visible, setVisible] = useState(false);
   const morphing = useRef(false), orb = useRef(null), menu = useRef(null);
-  const drag = useRef(null), suppressClick = useRef(false), dragResult = useRef(Promise.resolve());
-  const sendDrag = phase => {
-    dragResult.current = window.widget.drag({ phase }).then(moved => { suppressClick.current ||= moved; })
-      .catch(e => { suppressClick.current = true; setError(e.message); });
+  const drag = useRef(null), suppressClick = useRef(false);
+  const sendDrag = (phase, event) => {
+    window.widget.drag({ phase, clientX: event ? event.clientX : undefined, clientY: event ? event.clientY : undefined })
+      .catch(e => setError(e.message));
   };
   const beginDrag = event => {
-    if (event.button !== 0 || morphing.current) return;
+    if (event.button !== 0) return;
+    // Grabbing the shrinking orb mid-morph must start a drag: blocking it makes
+    // the ball feel dead, and the pending collapse then snaps the window away.
     suppressClick.current = false;
-    drag.current = { x: event.clientX, y: event.clientY };
+    // Screen coords, not client coords: a well-tracking window keeps the grab
+    // point under the cursor, so client displacement stays ~0 no matter how far
+    // the pointer actually travelled on screen (it would never trip the slop).
+    drag.current = { sx: event.screenX, sy: event.screenY };
     event.currentTarget.setPointerCapture(event.pointerId);
-    sendDrag('start');
+    sendDrag('start', event);
   };
   const moveDrag = event => {
     if (!drag.current) return;
-    sendDrag('move');
+    // Moving the native window can silently drop the capture; re-assert it so the
+    // drag keeps tracking (a lost capture without this would strand the gesture).
+    try { if (!event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.setPointerCapture(event.pointerId); } catch {}
+    sendDrag('move', event);
   };
   const endDrag = event => {
     if (!drag.current) return;
     const cancelled = event.type !== 'pointerup';
     // Suppress the click synchronously from pointer distance; the async IPC result
     // must not decide between "click" and "drag" or a fast release expands the orb.
-    if (cancelled || Math.hypot(event.clientX - drag.current.x, event.clientY - drag.current.y) > 5) suppressClick.current = true;
-    sendDrag(cancelled ? 'cancel' : 'end');
+    if (cancelled || Math.hypot(event.screenX - drag.current.sx, event.screenY - drag.current.sy) > 5) suppressClick.current = true;
+    sendDrag(cancelled ? 'cancel' : 'end', event);
     drag.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    // currentTarget is the document when the fallback below ends the gesture; it
+    // has no capture API, so guard the optional call before releasing.
+    if (event.currentTarget?.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   const toggle = async () => {
     if (morphing.current) return;
     morphing.current = true;
     try {
-      if (collapsed) {
-        await window.widget.resize(false);
+      if (!collapsed) {
+        // Expanding needs the full card on screen; refit the fixed window first.
+        await window.widget.anchor();
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       }
-      const next = !collapsed;
-      setCollapsed(next);
-      await new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 40 : 720));
-      if (next) await window.widget.resize(true);
-      (next ? orb : menu).current?.focus({ preventScroll: true });
+      setCollapsed(!collapsed);
+      await new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 40 : 760));
+      (!collapsed ? orb : menu).current?.focus({ preventScroll: true });
     } catch (e) { setError(e.message); }
     finally { morphing.current = false; }
   };
@@ -88,13 +97,20 @@ export function Widget() {
     update();
     const timer = setInterval(update, 3000);
     const unsubscribe = window.widget.onUpdate(update);
+    // Dropping the pointer capture mid-drag (transparent windows lose it on every
+    // SetWindowPos) can land the release outside the orb — clamp + fast cursor does
+    // exactly that. A document-level fallback ends the gesture wherever it lands.
+    const strayEnd = event => { if (drag.current) endDrag(event); };
+    document.addEventListener('pointerup', strayEnd, true);
+    document.addEventListener('pointercancel', strayEnd, true);
     const enterFx = () => requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
     const exitFx = () => setVisible(false);
     document.addEventListener('visibilitychange', update);
     const offExit = window.widget.onExit(exitFx);
     const offEnter = window.widget.onEnter(enterFx);
     return () => { alive = false; clearInterval(timer); unsubscribe(); offExit(); offEnter();
-      document.removeEventListener('visibilitychange', update); };
+      document.removeEventListener('visibilitychange', update);
+      document.removeEventListener('pointerup', strayEnd, true); document.removeEventListener('pointercancel', strayEnd, true); };
   }, []);
   const en = data?.language === 'en', t = (zh, english) => en ? english : zh;
   const now = Date.now();
@@ -143,8 +159,8 @@ export function Widget() {
       <button onClick={refresh} disabled={busy} title={t('立即刷新采集与额度', 'Refresh usage and quota now')}><ArrowClockwise size={21} className={busy ? 'spinning' : ''} />{busy ? t('刷新中', 'Refreshing') : t('自动刷新中', 'Auto-refreshing')}</button></footer>
     </div>
     <button ref={orb} className="widget-orb" inert={!collapsed} aria-hidden={!collapsed} aria-label={t(`今日 Token ${compact(data?.total)}，单击展开`, `Today ${compact(data?.total)} tokens, click to expand`)} aria-expanded={!collapsed}
-      onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
-      onClick={async event => { const keyboard = event.detail === 0; await dragResult.current; if (keyboard || !suppressClick.current) toggle(); suppressClick.current = false; }}>
+      onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+      onClick={event => { const keyboard = event.detail === 0; if (keyboard || !suppressClick.current) toggle(); suppressClick.current = false; }}>
       <span className="orb-glint" aria-hidden="true" />
       <Cube size={19} className="orb-icon" />
       <span className="orb-label">{t('今日 Token', 'Today’s tokens')}</span>

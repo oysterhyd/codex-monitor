@@ -253,7 +253,7 @@ if (!app.requestSingleInstanceLock()) {
     widget = createWidget({ data, restore: restoreMain, refresh: () => request("refresh").catch(() => {}) });
     if (widgetMode) widget.show();
     for (const [name, fn] of Object.entries({ snapshot: () => request("widget"), restore: restoreMain,
-      menu: () => widget.menu(), resize: compact => widget.resize(compact), drag: payload => widget.drag(payload), refresh: () => request("refresh") })) {
+      menu: () => widget.menu(), anchor: () => widget.anchor(), hover: hit => widget.hover(hit), drag: payload => widget.drag(payload), refresh: () => request("refresh") })) {
       ipcMain.handle(`widget:${name}`, (event, arg) => {
         if (event.sender !== widget.window.webContents) throw new Error(tr("无效来源"));
         return fn(arg);
