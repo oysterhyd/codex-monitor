@@ -27,7 +27,7 @@ function createWidget({ data, restore, refresh }) {
     saved = { ...window.getBounds(), topmost: window.isAlwaysOnTop(), mode: saved.mode === true };
     try { fs.writeFileSync(file, JSON.stringify(saved)); } catch {}
   };
-  window.on('moved', persist);
+  window.on('moved', () => { if (!drag) persist(); });
   const enter = () => { window.setPosition(position().x, position().y); window.showInactive(); window.setSkipTaskbar(false); window.webContents.send('widget:enter'); };
   let ready = false, wanted = false;
   // ready-to-show can be permanently cancelled when the window is hidden while its
@@ -61,18 +61,26 @@ function createWidget({ data, restore, refresh }) {
     persist();
   }, drag(payload) {
     if (!payload || !['start', 'move', 'end', 'cancel'].includes(payload.phase)) return false;
-    // Browser screenX/Y can change as a transparent window moves on mixed-DPI
-    // Windows desktops. Use OS cursor coordinates in the same DIP space as bounds.
+    // Use OS cursor coordinates in the same DIP space as bounds; the drag target
+    // is anchored to the grab offset (cursor - window origin) captured at start,
+    // so the ball stays glued to the pointer and clamped moves self-heal.
     const cursor = screen.getCursorScreenPoint();
-    if (payload.phase === 'start') { drag = { ...cursor, bounds: window.getBounds(), moved: false }; return false; }
+    if (payload.phase === 'start') {
+      const bounds = window.getBounds();
+      drag = { x0: cursor.x, y0: cursor.y, grabX: cursor.x - bounds.x, grabY: cursor.y - bounds.y, moved: false };
+      return false;
+    }
     if (!drag) return false;
     if (payload.phase !== 'cancel') {
-      const dx = cursor.x - drag.x, dy = cursor.y - drag.y;
-      drag.moved ||= Math.hypot(dx, dy) > 5;
-      const x = Math.round(drag.bounds.x + dx), y = Math.round(drag.bounds.y + dy);
-      const area = screen.getDisplayNearestPoint({ x, y }).workArea;
-      if (drag.moved) window.setPosition(Math.max(area.x, Math.min(x, area.x + area.width - currentWidth)),
-        Math.max(area.y, Math.min(y, area.y + area.height - currentHeight)));
+      drag.moved ||= Math.hypot(cursor.x - drag.x0, cursor.y - drag.y0) > 5;
+      if (drag.moved) {
+        const x = Math.round(cursor.x - drag.grabX), y = Math.round(cursor.y - drag.grabY);
+        const area = screen.getDisplayNearestPoint(cursor).workArea;
+        // Keep a 48px handle of the glass visible instead of pinning the whole
+        // window inside the work area, so edge drags never fight the cursor.
+        window.setPosition(Math.max(area.x - currentWidth + 48, Math.min(x, area.x + area.width - 48)),
+          Math.max(area.y - currentHeight + 48, Math.min(y, area.y + area.height - 48)));
+      }
     }
     const moved = drag.moved;
     if (payload.phase === 'end' || payload.phase === 'cancel') { drag = null; persist(); }

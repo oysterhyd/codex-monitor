@@ -36,7 +36,7 @@ export function Widget() {
   const beginDrag = event => {
     if (event.button !== 0 || morphing.current) return;
     suppressClick.current = false;
-    drag.current = true;
+    drag.current = { x: event.clientX, y: event.clientY };
     event.currentTarget.setPointerCapture(event.pointerId);
     sendDrag('start');
   };
@@ -47,7 +47,9 @@ export function Widget() {
   const endDrag = event => {
     if (!drag.current) return;
     const cancelled = event.type !== 'pointerup';
-    if (cancelled) suppressClick.current = true;
+    // Suppress the click synchronously from pointer distance; the async IPC result
+    // must not decide between "click" and "drag" or a fast release expands the orb.
+    if (cancelled || Math.hypot(event.clientX - drag.current.x, event.clientY - drag.current.y) > 5) suppressClick.current = true;
     sendDrag(cancelled ? 'cancel' : 'end');
     drag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
