@@ -6,7 +6,13 @@ const { widgetSnapshot } = require("./widget-data.cjs");
 const store = openStore(workerData.db);
 let scanning = false,
   shutting = false;
+let scanDone = Promise.resolve();
 const emit = (type, data) => parentPort.postMessage({ type, data });
+// Replaces polling the "scanning" flag on a timer: callers await the scan that is
+// in flight instead of waking up every 30 ms to re-check a boolean.
+const waitForScan = async () => {
+  while (scanning) await scanDone;
+};
 let quotaReply;
 function readQuota(options) {
   return new Promise((resolve, reject) => {
@@ -17,6 +23,8 @@ function readQuota(options) {
 async function scan(full = false) {
   if (scanning || shutting) return;
   scanning = true;
+  let settle;
+  scanDone = new Promise((resolve) => { settle = resolve; });
   try {
     const status = await store.scan(workerData.home, (p) => emit("progress", p), {full});
     if(status.changed || status.errors || status.full) emit("updated", null);
@@ -26,6 +34,7 @@ async function scan(full = false) {
     emit("error", "读取本机统计记录失败，将自动重试");
   } finally {
     scanning = false;
+    settle();
   }
 }
 let quotaTask;
@@ -41,7 +50,7 @@ async function queryQuota() {
       codexHome: workerData.home,
       executable: store.settings().codexExecutable,
     });
-    while (scanning) await new Promise((r) => setTimeout(r, 30));
+    await waitForScan();
     if(shutting)return;
     const after = readAccount(workerData.home)?.id || UNKNOWN;
     if (before !== after) { emit("updated", null); return; }
@@ -58,7 +67,7 @@ async function queryQuota() {
     });
     emit("updated", null);
   } catch (e) {
-    while (scanning) await new Promise((r) => setTimeout(r, 30));
+    await waitForScan();
     if(shutting)return;
     store.set("quotaStatus", {
       account: before,
@@ -83,7 +92,7 @@ parentPort.on("message", (msg) => {
     return;
   }
   queue = queue.then(async () => {
-    while (scanning) await new Promise((r) => setTimeout(r, 30));
+    await waitForScan();
     try {
       let result;
       switch (msg.method) {
@@ -126,8 +135,7 @@ parentPort.on("message", (msg) => {
           break;
         case "notice":
           result =
-            store.db
-              .prepare("INSERT OR IGNORE INTO notices VALUES(?,?)")
+            store.sql("INSERT OR IGNORE INTO notices VALUES(?,?)")
               .run(msg.args, new Date().toISOString()).changes > 0;
           break;
         default:
@@ -148,7 +156,7 @@ const scanTimer=setInterval(() => {
   queue = queue.then(()=>scan()).finally(()=>{scanQueued=false;});
 }, 3000);
 const quotaTimer=setInterval(() => {
-  const t = store.get("quotaStatus")?.attempted;
+  const t = store.peek("quotaStatus")?.attempted;
   if (!t || Date.now() - Date.parse(t) >= store.settings().quotaInterval * 1000)
     quota();
 }, 5000);

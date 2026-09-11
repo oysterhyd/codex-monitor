@@ -3,6 +3,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { promisify } = require("node:util");
 const activeChildren = new Set();
+// Resolution can fall back to a PowerShell AppX query (measured ~1.5 s on a machine
+// whose Codex came from the Store) and is re-run on every quota interval. Cache the
+// answer, and only trust the cache while the caller's override is unchanged.
+let resolvedCodex = null;
+let resolvedOverride = null;
 
 async function findCodex(override) {
   if (override) {
@@ -14,6 +19,8 @@ async function findCodex(override) {
       throw new Error("请选择有效的 codex.exe 绝对路径");
     return override;
   }
+  if (resolvedCodex && resolvedOverride === null) return resolvedCodex;
+  resolvedOverride = null;
   // Prefer the installed standalone binary: Store-package executables can reject external launches.
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     const file = path.join(
@@ -29,7 +36,7 @@ async function findCodex(override) {
       "bin",
       "codex.exe",
     );
-    if (fs.existsSync(file)) return file;
+    if (fs.existsSync(file)) return (resolvedCodex = file);
   }
   try {
     const { stdout } = await promisify(execFile)(
@@ -44,7 +51,7 @@ async function findCodex(override) {
     );
     for (const dir of stdout.trim().split(/\r?\n/).reverse()) {
       const file = path.join(dir.trim(), "app", "resources", "codex.exe");
-      if (fs.existsSync(file)) return file;
+      if (fs.existsSync(file)) return (resolvedCodex = file);
     }
   } catch {}
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
@@ -61,7 +68,7 @@ async function findCodex(override) {
       "bin",
       "codex.exe",
     );
-    if (fs.existsSync(file)) return file;
+    if (fs.existsSync(file)) return (resolvedCodex = file);
   }
   throw new Error(
     "未找到 Codex App Server，请在设置中选择桌面端随附的 codex.exe",

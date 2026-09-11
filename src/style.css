@@ -877,6 +877,18 @@ code {
     transform: rotate(360deg);
   }
 }
+/* Button/track transitions and the busy spinner also honour the OS preference. */
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+  .track i {
+    transition: none;
+  }
+  .spin {
+    animation: none;
+  }
+}
 @media (min-width: 1500px) {
   .price-form {
     grid-template-columns: minmax(180px, 1.6fr) repeat(4, minmax(90px, 1fr)) minmax(210px, 1.5fr);

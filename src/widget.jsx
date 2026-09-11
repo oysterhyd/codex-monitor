@@ -4,7 +4,14 @@ import icon from '../assets/monitor-glass.png';
 import { createRefresh } from './refresh.mjs';
 import './widget.css';
 
-const compact = n => n == null ? '—' : Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 }).format(n);
+// Built once: the widget re-renders every 3s and each card formats several values.
+const compactFormat = Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 });
+const clockFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+const stampFormats = {
+  'en-GB': new Intl.DateTimeFormat('en-GB', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }),
+  'zh-CN': new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }),
+};
+const compact = n => n == null ? '—' : compactFormat.format(n);
 const percent = n => n == null ? '—' : `${Number(n.toFixed(1))}%`;
 
 function Sparkline({ points = [], large = false, english }) {
@@ -20,7 +27,7 @@ function Sparkline({ points = [], large = false, english }) {
         <path d={line} fill="none" stroke="#00a58e" strokeWidth={large ? 2 : 3.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" /></>}
     </svg>
     {large && <><span className="widget-chart-max">{compact(max === 1 && points.every(p => !p.total) ? 0 : max)}</span>
-      <div className="widget-ticks">{[0, 24, 48, 72, 95].map(i => <span key={i}>{points[i] ? new Date(points[i].time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>)}</div></>}
+      <div className="widget-ticks">{[0, 24, 48, 72, 95].map(i => <span key={i}>{points[i] ? clockFormat.format(new Date(points[i].time)) : '—'}</span>)}</div></>}
   </div>;
 }
 
@@ -28,7 +35,7 @@ export function Widget() {
   const [collapsed, setCollapsed] = useState(false);
   const [visible, setVisible] = useState(false);
   const morphing = useRef(false), orb = useRef(null), menu = useRef(null);
-  const drag = useRef(null), suppressClick = useRef(false);
+  const drag = useRef(null), suppressClick = useRef(false), lightFrame = useRef(0);
   const sendDrag = (phase, event) => {
     window.widget.drag({ phase, clientX: event ? event.clientX : undefined, clientY: event ? event.clientY : undefined })
       .catch(e => setError(e.message));
@@ -79,15 +86,25 @@ export function Widget() {
     } catch (e) { setError(e.message); }
     finally { morphing.current = false; }
   };
+  // One update per frame: pointermove fires repeatedly over a blurred surface and the
+  // rect read plus four custom-property writes are the cost, so batch them into a rAF.
   const light = event => {
-    const el = event.currentTarget, rect = el.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width, y = (event.clientY - rect.top) / rect.height;
-    el.style.setProperty('--light-x', `${x * 100}%`);
-    el.style.setProperty('--light-y', `${y * 100}%`);
-    el.style.setProperty('--tilt-x', `${(0.5 - y) * 5}deg`);
-    el.style.setProperty('--tilt-y', `${(x - 0.5) * 5}deg`);
+    if (lightFrame.current) return;
+    const el = event.currentTarget, { clientX, clientY } = event, rect = el.getBoundingClientRect();
+    lightFrame.current = requestAnimationFrame(() => {
+      lightFrame.current = 0;
+      const x = (clientX - rect.left) / rect.width, y = (clientY - rect.top) / rect.height;
+      el.style.setProperty('--light-x', `${x * 100}%`);
+      el.style.setProperty('--light-y', `${y * 100}%`);
+      el.style.setProperty('--tilt-x', `${(0.5 - y) * 5}deg`);
+      el.style.setProperty('--tilt-y', `${(x - 0.5) * 5}deg`);
+    });
   };
-  const resetLight = event => { event.currentTarget.style.setProperty('--tilt-x', '0deg'); event.currentTarget.style.setProperty('--tilt-y', '0deg'); };
+  const resetLight = event => {
+    if (lightFrame.current) { cancelAnimationFrame(lightFrame.current); lightFrame.current = 0; }
+    event.currentTarget.style.setProperty('--tilt-x', '0deg');
+    event.currentTarget.style.setProperty('--tilt-y', '0deg');
+  };
   const [data, setData] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   useEffect(() => {
     document.documentElement.classList.add('widget-mode');
@@ -122,6 +139,7 @@ export function Widget() {
     const offExit = window.widget.onExit(exitFx);
     const offEnter = window.widget.onEnter(enterFx);
     return () => { alive = false; clearInterval(timer); unsubscribe(); offExit(); offEnter();
+      if (lightFrame.current) { cancelAnimationFrame(lightFrame.current); lightFrame.current = 0; }
       document.removeEventListener('visibilitychange', update);
       document.removeEventListener('pointermove', hitTest);
       document.removeEventListener('pointerup', strayEnd, true); document.removeEventListener('pointercancel', strayEnd, true); };
@@ -169,7 +187,7 @@ export function Widget() {
       </div>
       <div className="widget-trend"><h2>{t('Token 使用趋势', 'Token usage')} <span>{t('(近 24 小时)', '(last 24h)')}</span></h2><Sparkline points={data?.timeline} large english={en} /></div>
     </section>
-    <footer className="widget-footer"><span title={error || t('本机采集更新时间；额度采样时间见指标提示', 'Local collection time; hover quotas for their sample times')}><Clock size={21} />{error ? t('连接中断 · 自动重试', 'Disconnected · retrying') : `${t('最后更新：', 'Updated: ')}${data?.scan?.lastScan ? new Date(data.scan.lastScan).toLocaleString(en ? 'en-GB' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '—'}`}</span>
+    <footer className="widget-footer"><span title={error || t('本机采集更新时间；额度采样时间见指标提示', 'Local collection time; hover quotas for their sample times')}><Clock size={21} />{error ? t('连接中断 · 自动重试', 'Disconnected · retrying') : `${t('最后更新：', 'Updated: ')}${data?.scan?.lastScan ? stampFormats[en ? 'en-GB' : 'zh-CN'].format(new Date(data.scan.lastScan)) : '—'}`}</span>
       <button onClick={refresh} disabled={busy} title={t('立即刷新采集与额度', 'Refresh usage and quota now')}><ArrowClockwise size={21} className={busy ? 'spinning' : ''} />{busy ? t('刷新中', 'Refreshing') : t('自动刷新中', 'Auto-refreshing')}</button></footer>
     </div>
     <button ref={orb} className="widget-orb" inert={!collapsed} aria-hidden={!collapsed} aria-label={t(`今日 Token ${compact(data?.total)}，单击展开`, `Today ${compact(data?.total)} tokens, click to expand`)} aria-expanded={!collapsed}

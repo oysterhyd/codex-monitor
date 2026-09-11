@@ -142,6 +142,7 @@
   "额度窗口": "Quota window",
   "小时": " hours",
   "剩余额度历史曲线": "Remaining quota history",
+  "额度属于当前登录账号，可能包含其他设备的用量；Token 统计仅覆盖本机 Codex 桌面端记录。": "Quota belongs to the signed-in account and may include usage from other devices; token totals only cover Codex desktop records on this machine.",
   "本机数据 ·": "Local data · ",
   " 起": " onward",
   "等待首条记录": "Awaiting first record",
@@ -233,5 +234,7 @@
   "归属至 {0}": "Assign to {0}",
   "将未归属记录归入 {0}": "Assign unassigned records to {0}",
   "额度重置或窗口调整": "Quota reset or window adjustment",
-  "实线为采样趋势，虚线为重置，留白为采样缺口": "Solid: sampled trend · Dashed: reset · Blank: sampling gap"
+  "实线为采样趋势，虚线为重置，留白为采样缺口": "Solid: sampled trend · Dashed: reset · Blank: sampling gap",
+  "应用正在退出": "Application is exiting",
+  "Standard 标准价 · 短上下文 · 官网核对 2026-09-10；历史按此基准估算": "Standard pricing · short context · verified 2026-09-10; history is estimated on this baseline"
 }

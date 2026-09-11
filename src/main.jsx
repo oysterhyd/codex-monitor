@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Pulse as Activity,
@@ -24,44 +24,47 @@ import {
 } from "@phosphor-icons/react";
 import "./style.css";
 import "./glass.css";
-import { tr, setLanguage, dateLocale, systemText } from "./i18n.mjs";
+import { tr, setLanguage, dateFormat, systemText } from "./i18n.mjs";
 import monitorIcon from "../assets/monitor-glass.png";
 import { createRefresh } from "./refresh.mjs";
 import { chartPaths } from "./chart-paths.mjs";
 import { Widget } from "./widget.jsx";
 
 const api = window.monitor;
-const compact = (n) =>
-  n == null
-    ? "—"
-    : Intl.NumberFormat("en", {
-        notation: "compact",
-        maximumFractionDigits: 2,
-      }).format(n);
-const full = (n) =>
-  n == null
-    ? "—"
-    : Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(n);
-const money = (n) =>
-  n == null
-    ? "—"
-    : "$" +
-      n.toLocaleString("en", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
+// Each option set is built once: the render path formats hundreds of values per update
+// and an Intl constructor costs ~20-35x formatting a single value.
+const compactFormat = new Intl.NumberFormat("en", {
+  notation: "compact",
+  maximumFractionDigits: 2,
+});
+const fullFormat = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
+const moneyFormat = new Intl.NumberFormat("en", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const recordMoneyFormat = new Intl.NumberFormat("en", {
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 6,
+});
+const DATE_OPTIONS = {
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+};
+// The key identifies the option set; dateFormat caches one formatter per key+language.
+const TICK_FORMATS = {
+  tickDay: { month: "2-digit", day: "2-digit" },
+  tickTime: { hour: "2-digit", minute: "2-digit", hour12: false },
+};
+const compact = (n) => (n == null ? "—" : compactFormat.format(n));
+const full = (n) => (n == null ? "—" : fullFormat.format(n));
+const money = (n) => (n == null ? "—" : "$" + moneyFormat.format(n));
 const pct = (n) => (n == null ? "—" : (n * 100).toFixed(1) + "%");
+const wholePercent = (n) => (n == null ? "—" : n.toFixed(0) + "%");
 const recordMoney = (n, t) => !t.requests ? "—" : n == null ? tr("未定价") :
-  "$" + n.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 6 }) + (t.unpriced ? tr(" + 未定价") : "");
-const date = (t) =>
-  t
-    ? new Date(t).toLocaleString(dateLocale(), {
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "—";
+  "$" + recordMoneyFormat.format(n) + (t.unpriced ? tr(" + 未定价") : "");
+const date = (t) => t ? dateFormat("short", DATE_OPTIONS).format(new Date(t)) : "—";
 const duration = (n) =>
   n == null
     ? "—"
@@ -70,6 +73,11 @@ const duration = (n) =>
       : (n / 60000).toFixed(1) + tr(" 分钟");
 const shortPath = (p) => p === "未归属项目" ? systemText(p) : p?.split(/[\\/]/).filter(Boolean).at(-1) || p;
 
+// Asked for at call time so a change to the OS setting is honoured without a reload.
+const prefersReducedMotion = () =>
+  typeof matchMedia === "function" &&
+  matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 function Animated({ value, format = compact }) {
   const [shown, setShown] = useState(value),
     prev = useRef(value);
@@ -77,7 +85,8 @@ function Animated({ value, format = compact }) {
     if (
       value == null ||
       prev.current == null ||
-      document.hidden
+      document.hidden ||
+      prefersReducedMotion()
     ) {
       setShown(value);
       prev.current = value;
@@ -105,7 +114,25 @@ function Empty({ children }) {
     </div>
   );
 }
-function Chart({
+// Resolve the hovered sample from one overlay instead of a hit target per point:
+// three elements per sample grew with every range and 30d/all plotted ~700 of them.
+const nearestSample = (event, xy) => {
+  const matrix = event.currentTarget.getScreenCTM?.();
+  if (!matrix) return null;
+  const inverse = matrix.inverse();
+  const x = inverse.a * event.clientX + inverse.c * event.clientY + inverse.e;
+  let best = 0,
+    distance = Infinity;
+  for (let i = 0; i < xy.length; i++) {
+    const candidate = Math.abs(xy[i][0] - x);
+    if (candidate < distance) {
+      distance = candidate;
+      best = i;
+    }
+  }
+  return best;
+};
+const Chart = React.memo(function Chart({
   points,
   value = "total",
   color = "var(--accent)",
@@ -114,23 +141,39 @@ function Chart({
   label,
   replayKey,
   range,
+  lang,
 }) {
   const [hover, setHover] = useState(null);
   useEffect(() => setHover(null), [replayKey]);
-  if (!points.length) return <Empty />;
-  const max = percent ? 100 : Math.max(1, ...points.map((p) => p[value] || 0));
-  const first = range?.start ? Date.parse(range.start) : points[0].time,
-    last = range?.end ? Date.parse(range.end) : points.at(-1).time;
-  const xy = points.map((p, i) => [
-    44 +
-      (last > first
-        ? (p.time - first) / (last - first)
-        : points.length === 1 ? 0.5 : i / (points.length - 1)) *
-        836,
-    150 - ((p[value] || 0) / max) * 128,
-  ]);
-  const { line, area, connectors = [] } = chartPaths(points, xy, { step, smooth: step });
-  const chosen = hover == null ? null : points[hover];
+  const geometry = useMemo(() => {
+    if (!points.length) return null;
+    const max = percent ? 100 : Math.max(1, ...points.map((p) => p[value] || 0));
+    const first = range?.start ? Date.parse(range.start) : points[0].time,
+      last = range?.end ? Date.parse(range.end) : points.at(-1).time;
+    const xy = points.map((p, i) => [
+      44 +
+        (last > first
+          ? (p.time - first) / (last - first)
+          : points.length === 1 ? 0.5 : i / (points.length - 1)) *
+          836,
+      150 - ((p[value] || 0) / max) * 128,
+    ]);
+    return {
+      max,
+      first,
+      last,
+      xy,
+      ...chartPaths(points, xy, { step, smooth: step }),
+    };
+  }, [points, value, percent, step, range]);
+  if (!geometry) return <Empty />;
+  const { max, first, last, xy, line, area, connectors = [] } = geometry;
+  // A newer snapshot can shorten the series while a hover index is still held.
+  const hoverIndex = hover != null && hover < points.length ? hover : null;
+  const chosen = hoverIndex == null ? null : points[hoverIndex];
+  const tickKey = last - first > 2 * 86400000 ? "tickDay" : "tickTime";
+  const tickFormat = dateFormat(tickKey, TICK_FORMATS[tickKey]);
+  const fractions = last > first ? [0, 1/6, 2/6, 3/6, 4/6, 5/6, 1] : [0];
   return (
     <div className="chart-wrap">
       <svg
@@ -156,7 +199,7 @@ function Chart({
             </text>
           </g>
         ))}
-        {(last > first ? [0, 1/6, 2/6, 3/6, 4/6, 5/6, 1] : [0]).map((f,i) => <line key={f} className={i % 2 ? "chart-minor-tick" : ""} x1={44+f*836} x2={44+f*836} y1="22" y2="150" stroke="var(--border)" opacity=".35" />)}
+        {fractions.map((f,i) => <line key={f} className={i % 2 ? "chart-minor-tick" : ""} x1={44+f*836} x2={44+f*836} y1="22" y2="150" stroke="var(--border)" opacity=".35" />)}
         <g key={replayKey} className="chart-reveal">
         <path
           d={area}
@@ -170,20 +213,42 @@ function Chart({
           strokeWidth="2.5"
           strokeLinejoin="round"
         />
-        {connectors.map((d,i) => <path key={i} d={d} fill="none" stroke={color} strokeWidth="1.2" strokeDasharray="3 5" opacity=".45"><title>{tr("额度重置或窗口调整")}</title></path>)}
-        {xy.map(([x, y], i) => (
-          <g key={i} onMouseEnter={() => setHover(i)}>
-            <rect x={x - 8} y="12" width="16" height="144" fill="transparent" />
-            <circle
-              cx={x}
-              cy={y}
-              r={hover === i ? 5 : points.length < 15 ? 2.5 : 0}
-              fill={color}
-            />
-          </g>
-        ))}
+        {/* One dashed layer for every reset/gap segment: the same strokes as one path
+            element instead of one element per connector on 30d/all ranges. */}
+        {connectors.length > 0 && (
+          <path
+            d={connectors.join(" ")}
+            fill="none"
+            stroke={color}
+            strokeWidth="1.2"
+            strokeDasharray="3 5"
+            opacity=".45"
+          >
+            <title>{tr("额度重置或窗口调整")}</title>
+          </path>
+        )}
+        {points.length < 15
+          ? xy.map(([x, y], i) => (
+              <circle key={i} cx={x} cy={y} r={hoverIndex === i ? 5 : 2.5} fill={color} />
+            ))
+          : hoverIndex != null && (
+              <circle cx={xy[hoverIndex][0]} cy={xy[hoverIndex][1]} r="5" fill={color} />
+            )}
         </g>
-        {(last > first ? [0, 1/6, 2/6, 3/6, 4/6, 5/6, 1] : [0]).map((fraction, index) => (
+        {/* Hover surface: outside the reveal group so it stays live during the wipe. */}
+        <rect
+          className="chart-hit"
+          x="44"
+          y="12"
+          width="836"
+          height="144"
+          fill="transparent"
+          onMouseMove={(event) => {
+            const index = nearestSample(event, xy);
+            if (index != null) setHover(index);
+          }}
+        />
+        {fractions.map((fraction, index) => (
             <text
               className={`chart-tick ${index % 2 ? "chart-minor-tick" : ""}`}
               key={fraction}
@@ -195,7 +260,7 @@ function Chart({
               fill="var(--muted)"
               fontSize="16"
             >
-              {new Date(first + fraction * (last - first)).toLocaleString(dateLocale(), last-first > 2*86400000 ? {month:"2-digit",day:"2-digit"} : {hour:"2-digit",minute:"2-digit",hour12:false})}
+              {tickFormat.format(new Date(first + fraction * (last - first)))}
             </text>
           ))}
       </svg>
@@ -206,7 +271,7 @@ function Chart({
       </div>
     </div>
   );
-}
+});
 function Panel({ title, meta, children, className = "" }) {
   return (
     <section className={"panel " + className}>
@@ -218,7 +283,7 @@ function Panel({ title, meta, children, className = "" }) {
     </section>
   );
 }
-function Metric({ label, value, format, foot, icon: Icon, color, onClick }) {
+const Metric = React.memo(function Metric({ label, value, format, foot, icon: Icon, color, onClick }) {
   return (
     <button
       className="metric"
@@ -238,24 +303,32 @@ function Metric({ label, value, format, foot, icon: Icon, color, onClick }) {
       </div>
     </button>
   );
-}
-function WindowQuota({ q }) {
+});
+const WindowQuota = React.memo(function WindowQuota({ q, lang }) {
   const stale = q.resets != null && q.resets * 1000 < Date.now();
   const remaining = 100 - q.used;
+  const shown = remaining.toFixed(0);
+  const windowLabel =
+    q.minutes >= 1440
+      ? tr("{0} 天窗口", Math.round(q.minutes / 1440))
+      : tr("{0} 小时窗口", q.minutes / 60);
   return (
     <div className="quota-window">
       <div className="row">
-        <span>
-          {q.minutes >= 1440
-            ? tr("{0} 天窗口", Math.round(q.minutes / 1440))
-            : tr("{0} 小时窗口", q.minutes / 60)}
-        </span>
+        <span>{windowLabel}</span>
         <b>
-          {remaining.toFixed(0)}
+          {shown}
           <small>{tr("% 剩余")}</small>
         </b>
       </div>
-      <div className="track">
+      <div
+        className="track"
+        role="meter"
+        aria-label={windowLabel}
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow={Number(shown)}
+      >
         <i
           style={{
             width: remaining + "%",
@@ -275,8 +348,8 @@ function WindowQuota({ q }) {
       </div>
     </div>
   );
-}
-function Rank({ rows, type, onSelect }) {
+});
+const Rank = React.memo(function Rank({ rows, type, onSelect, lang }) {
   return rows.length ? (
     <div className="rank">
       {rows.slice(0, 8).map((r, i) => (
@@ -308,7 +381,166 @@ function Rank({ rows, type, onSelect }) {
   ) : (
     <Empty />
   );
-}
+});
+
+// Both tables are memoised units: any unrelated App state change (busy, toast, an
+// expanded record, a widget toggle) used to re-render every row. `lang` is part of the
+// props because tr()/date() read module state, so a language switch must invalidate.
+const BREAKDOWN_PAGE_SIZE = 50;
+const Breakdown = React.memo(function Breakdown({ rows, view, setView, choose, resetKey, lang }) {
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [view, resetKey]);
+  const pages = Math.max(1, Math.ceil(rows.length / BREAKDOWN_PAGE_SIZE));
+  const current = Math.min(page, pages);
+  const visible = rows.slice((current - 1) * BREAKDOWN_PAGE_SIZE, current * BREAKDOWN_PAGE_SIZE);
+  return (
+    <>
+      <div className="segmented inner" role="group" aria-label={tr("消耗明细")}>
+        {[
+          ["models", tr("按模型")],
+          ["projects", tr("按项目")],
+          ["tasks", tr("按任务")],
+        ].map(([id, name]) => (
+          <button
+            key={id}
+            aria-pressed={view === id}
+            className={view === id ? "active" : ""}
+            onClick={() => setView(id)}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>
+                {view === "models"
+                  ? tr("模型")
+                  : view === "projects"
+                    ? tr("项目")
+                    : tr("任务 ID")}
+              </th>
+              <th>{tr("输入")}</th>
+              <th>{tr("缓存")}</th>
+              <th>{tr("输出")}</th>
+              <th>{tr("等值 USD")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r) => (
+              <tr
+                key={r.name}
+                onClick={() =>
+                  choose(
+                    view === "models"
+                      ? "model"
+                      : view === "projects"
+                        ? "project"
+                        : "session",
+                    r.name,
+                  )
+                }
+              >
+                <td>
+                  <button className="table-link" title={r.name}>
+                    {view === "projects" ? shortPath(r.name) : r.name}
+                    {r.project && <small>{shortPath(r.project)}</small>}
+                  </button>
+                </td>
+                <td>{full(r.input)}</td>
+                <td>{full(r.cached)}</td>
+                <td>{full(r.output)}</td>
+                <td>
+                  {r.unpriced === r.requests ? tr("未定价") : money(r.cost)}
+                  {r.unpriced > 0 && r.unpriced < r.requests && (
+                    <small>{tr("部分未定价")}</small>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!rows.length && <Empty />}
+      </div>
+      {pages > 1 && (
+        <div className="pagination">
+          <button className="button" disabled={current <= 1} onClick={() => setPage(current - 1)}>{tr("上一页")}</button>
+          <span aria-live="polite">{tr("第 {0} / {1} 页 · 每页 50 条", current, pages)}</span>
+          <button className="button" disabled={current >= pages} onClick={() => setPage(current + 1)}>{tr("下一页")}</button>
+        </div>
+      )}
+    </>
+  );
+});
+const RunRecords = React.memo(function RunRecords({ turns, records, expanded, setExpanded, setRecordPage, lang }) {
+  return (
+    <>
+      <div className="table-scroll">
+        <table className="run-records">
+          <thead>
+            <tr>
+              <th>{tr("开始时间 / 任务")}</th>
+              <th>{tr("模型")}</th>
+              <th>{tr("状态")}</th>
+              <th>{tr("输入 Token")}</th>
+              <th>{tr("输出 Token")}</th>
+              <th>{tr("估算费用")}</th>
+              <th>{tr("耗时")}</th>
+              <th>{tr("首 Token")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {turns.map((t) => (
+              <React.Fragment key={t.id}><tr>
+                <td title={t.id}>
+                  {date(t.started)}
+                  <small>
+                    {t.session.slice(0, 8)} ·{" "}
+                    {shortPath(t.project)}
+                  </small>
+                </td>
+                <td><button className="record-detail" onClick={()=>setExpanded(expanded===t.id?null:t.id)} aria-expanded={expanded===t.id}>
+                  {t.models?.length>1 ? tr("{0} 个模型", t.models.length) : (t.models?.[0]?.model || t.model)}<small>{expanded===t.id?tr("收起明细"):tr("查看明细")}</small>
+                </button></td>
+                <td>
+                  {
+                    {
+                      completed: tr("已完成"),
+                      failed: tr("失败"),
+                      aborted: tr("已取消"),
+                      running: tr("未结束"),
+                    }[t.status]
+                  }
+                </td>
+                <td title={tr("缓存输入 {0} tokens", full(t.cached))}>{t.requests ? full(t.input) : "—"}<small>{recordMoney(t.inputCost, t)}</small></td>
+                <td>{t.requests ? full(t.output) : "—"}<small>{recordMoney(t.outputCost, t)}</small></td>
+                <td>{recordMoney(t.cost, t)}</td>
+                <td>{duration(t.duration)}</td>
+                <td>{duration(t.ttft)}</td>
+              </tr>
+              {expanded===t.id && <tr className="record-expanded"><td colSpan={8}>
+                <div>{tr("完整任务 ·")}{t.id}</div>
+                <div className="model-details">{t.models?.map(m=><div key={m.model}>
+                  <strong>{m.model}</strong><span>{tr("输入 {0} · 缓存 {1} · 输出 {2}", full(m.input), full(m.cached), full(m.output))}</span>
+                  <span>{tr("输入 {0} · 输出 {1} · 合计 {2}", recordMoney(m.inputCost,m), recordMoney(m.outputCost,m), recordMoney(m.cost,m))}</span>
+                </div>)}</div>
+                {!t.models?.length && <span>{tr("暂无用量记录")}</span>}
+              </td></tr>}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="pagination">
+        <button className="button" disabled={!records || records.page<=1} onClick={()=>{setRecordPage(records.page-1);setExpanded(null);}}>{tr("上一页")}</button>
+        <span aria-live="polite">{tr("第 {0} / {1} 页 · 每页 50 条", records?.page || 1, records?.pages || 1)}</span>
+        <button className="button" disabled={!records || records.page>=records.pages} onClick={()=>{setRecordPage(records.page+1);setExpanded(null);}}>{tr("下一页")}</button>
+      </div>
+    </>
+  );
+});
 
 function App() {
   const [widgetMode, setWidgetMode] = useState(false), [widgetPending, setWidgetPending] = useState(false);
@@ -350,15 +582,42 @@ function App() {
     const wake=()=>{if(!document.hidden)load();};
     document.addEventListener('visibilitychange',wake);
     const appEl=document.querySelector('.app');
-    const offEnter=api?.onEnterApp(()=>{
+    const enter=()=>{
       if(!appEl)return;
+      // Clearing both classes is unconditional: `.app-to-widget` is what hides the window
+      // while the widget morphs, so returning before this would strand it at opacity 0.
       appEl.classList.remove('app-to-widget','app-enter');
+      // Under reduce there is nothing to replay and no animationend to settle it, so never
+      // add a class whose only cleanup path is an animation event.
+      if(prefersReducedMotion())return;
       void appEl.offsetWidth;
       appEl.classList.add('app-enter');
+    };
+    const settle=e=>{if(e.animationName==='app-enter')appEl.classList.remove('app-enter');};
+    const offEnter=api?.onEnterApp?.(enter);
+    // The first import reports progress through the same "update" channel the widget
+    // already listens on; without this the window shows only "connecting" while the
+    // initial full scan runs.
+    const offUpdate=api?.onUpdate?.(message=>{
+      if(message?.type==='progress')setProgress(message.data);
+      else if(message?.type==='updated'||message?.type==='recovered')setProgress(null);
     });
-    appEl?.addEventListener('animationend',e=>{if(e.animationName==='app-enter')appEl.classList.remove('app-enter');});
-    return ()=>{clearInterval(timer);off?.();offEnter?.();document.removeEventListener('visibilitychange',wake);};
+    appEl?.addEventListener('animationend',settle);
+    return ()=>{clearInterval(timer);document.removeEventListener('visibilitychange',wake);appEl?.removeEventListener('animationend',settle);offEnter?.();offUpdate?.();};
   },[]);
+  const heading=useRef(null),lastFocus=useRef(null);
+  useEffect(() => {
+    const track=event=>{lastFocus.current=event.target;};
+    document.addEventListener('focusin',track);
+    return ()=>document.removeEventListener('focusin',track);
+  },[]);
+  // The metric cards navigate away, which unmounts the control that had focus. Never
+  // steal focus from a click, but never strand it on <body> after a view switch either.
+  useEffect(() => {
+    const previous=lastFocus.current;
+    if(!previous||previous===document.body||previous.isConnected)return;
+    heading.current?.focus({preventScroll:true});
+  },[page]);
   useEffect(() => {
     document.documentElement.dataset.theme = data?.settings.theme || "system";
   }, [data?.settings.theme]);
@@ -380,7 +639,12 @@ function App() {
       setBusy(false);
     }
   };
-  const choose = (key, value) => setFilter((f) => ({ ...f, [key]: value }));
+  const choose = useCallback((key, value) => setFilter((f) => ({ ...f, [key]: value })), []);
+  const showQuota = useCallback(() => setPage("quota"), []);
+  const showTasks = useCallback(() => { setPage("history"); setView("tasks"); }, []);
+  const showPrices = useCallback(() => setPage("settings"), []);
+  const showModels = useCallback(() => { setPage("history"); setView("models"); }, []);
+  const selectModel = useCallback((name) => { choose("model", name); setPage("history"); }, [choose]);
   const enterWidgetMode = async event => {
     const on = event.target.checked;
     if (widgetPending) return;
@@ -403,7 +667,8 @@ function App() {
   ];
   const s = data?.sums,
     p = data?.performance,
-    quotas = data?.quotas || [];
+    quotas = data?.quotas || [],
+    lang = data?.settings.language;
   const accountLabel = id => id === "unassigned" ? tr("未归属") : (data?.accounts?.find(a => a.id === id)?.label || tr("未归属"));
   const quotaId = q => `${q.account}:${q.bucket}:${q.slot}`;
   const primary =
@@ -411,17 +676,23 @@ function App() {
     quotas[0];
   const selected =
     quotas.find((q) => quotaId(q) === quotaKey) || primary;
-  const quotaPoints = selected
-    ? (data?.quotaHistory || [])
-        .filter((q) => q.account === selected.account && q.bucket === selected.bucket && q.slot === selected.slot)
-        .map((q) => ({
-          name: date(q.ts),
-          time: Date.parse(q.ts),
-          remaining: 100 - q.used,
-          resets: q.resets,
-          gapBefore: q.gapBefore,
-        }))
-    : [];
+  // Rebuilt only when the snapshot or the selected window changes, not on every
+  // unrelated state change (language is a dependency: tr()/date() read module state).
+  const quotaPoints = useMemo(
+    () =>
+      selected
+        ? (data?.quotaHistory || [])
+            .filter((q) => q.account === selected.account && q.bucket === selected.bucket && q.slot === selected.slot)
+            .map((q) => ({
+              name: date(q.ts),
+              time: Date.parse(q.ts),
+              remaining: 100 - q.used,
+              resets: q.resets,
+              gapBefore: q.gapBefore,
+            }))
+        : [],
+    [data?.quotaHistory, selected, lang],
+  );
   return (
     <div className="app">
       <header className="topbar">
@@ -440,7 +711,9 @@ function App() {
               <span className="widget-switch-label"><FrameCorners size={15} aria-hidden="true" />{tr("小组件")}</span>
               <input type="checkbox" role="switch" aria-label={tr("桌面小组件模式")} checked={widgetMode} disabled={!api || busy || widgetPending} onChange={enterWidgetMode} />
             </label>
-            {data?.settings.muted && <BellSlash size={16} />}
+            {data?.settings.muted && (
+              <BellSlash size={16} role="img" aria-label={tr("静音额度提醒")} />
+            )}
             <span className="status-pill">
               <span className="status-dot" />
               {progress
@@ -464,7 +737,7 @@ function App() {
         <div key={page} className={`content${page === "settings" ? " settings-content" : ""}`}>
           <div className="page-title">
             <div>
-              <h1>
+              <h1 ref={heading} tabIndex={-1}>
                 {page === "overview"
                   ? tr("用量总览")
                   : page === "history"
@@ -502,7 +775,9 @@ function App() {
               <button onClick={load}>{tr("重试")}</button>
             </div>
           )}
-          {progress && (
+          {/* The copy says 首次导入历史, so this is the pre-first-snapshot window only:
+              a routine rescan cannot re-insert the notice and shift the page under it. */}
+          {progress && !data && (
             <div className="notice">{tr("首次导入历史 ·")}{progress.scanned} / {progress.total}{" "}{tr("个文件，完成后自动展示。")}</div>
           )}
           {!data ? (
@@ -625,13 +900,13 @@ function App() {
                       label={tr("账户剩余额度")}
                       icon={Target}
                       value={primary ? 100 - primary.used : null}
-                      format={(n) => (n == null ? "—" : n.toFixed(0) + "%")}
+                      format={wholePercent}
                       foot={
                         primary
                           ? tr("{0} 小时窗口", primary.minutes / 60)
                           : tr("尚未获得额度快照")
                       }
-                      onClick={() => setPage("quota")}
+                      onClick={showQuota}
                     />
                     <Metric
                       label={
@@ -640,10 +915,7 @@ function App() {
                       icon={Stack}
                       value={s.total}
                       foot={tr("{0} 次用量记录", full(s.requests))}
-                      onClick={() => {
-                        setPage("history");
-                        setView("tasks");
-                      }}
+                      onClick={showTasks}
                     />
                     <Metric
                       label={tr("API 等值估算 · USD")}
@@ -658,7 +930,7 @@ function App() {
                           : tr("按标准短上下文价格估算")
                       }
                       color="var(--amber)"
-                      onClick={() => setPage("settings")}
+                      onClick={showPrices}
                     />
                     <Metric
                       label={tr("缓存命中率")}
@@ -667,10 +939,7 @@ function App() {
                       format={pct}
                       foot={tr("{0} 缓存输入 tokens", compact(s.cached))}
                       color="var(--blue)"
-                      onClick={() => {
-                        setPage("history");
-                        setView("models");
-                      }}
+                      onClick={showModels}
                     />
                   </div>
                   <div className="two-col">
@@ -690,7 +959,7 @@ function App() {
                           <i className="blue" />{tr("输出")}<b>{compact(s.output)}</b>
                         </span>
                       </div>
-                      <Chart points={data.timeline} range={data.chartRange === "all" ? undefined : data.range} replayKey={data.chartTransitionKey} label={tr("Token 总量趋势")} />
+                      <Chart points={data.timeline} range={data.chartRange === "all" ? undefined : data.range} replayKey={data.chartTransitionKey} label={tr("Token 总量趋势")} lang={lang} />
                     </Panel>
                     <Panel title={tr("任务平均输出速率")}>
                       <div className="speed" title={tr("包含工具与等待时间；日志未提供独立生成时长")}>
@@ -725,10 +994,8 @@ function App() {
                         <Rank
                           rows={data.models}
                           type="model"
-                          onSelect={(m) => {
-                            choose("model", m);
-                            setPage("history");
-                          }}
+                          onSelect={selectModel}
+                          lang={lang}
                         />
                       </Panel>
                       <Panel
@@ -741,7 +1008,7 @@ function App() {
                           quotas.slice(0, 4).map((q) => (
                             <div key={q.id}>
                               <span className="bucket-label">{q.bucket}</span>
-                              <WindowQuota q={q} />
+                              <WindowQuota q={q} lang={lang} />
                             </div>
                           ))
                         ) : (
@@ -755,82 +1022,15 @@ function App() {
                       </Panel>
                     </div>
                   ) : (
-                    <Panel title={tr("消耗明细")}>
-                      <div className="segmented inner">
-                        {[
-                          ["models", tr("按模型")],
-                          ["projects", tr("按项目")],
-                          ["tasks", tr("按任务")],
-                        ].map(([id, name]) => (
-                          <button
-                            key={id}
-                            className={view === id ? "active" : ""}
-                            onClick={() => setView(id)}
-                          >
-                            {name}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="table-scroll">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>
-                                {view === "models"
-                                  ? tr("模型")
-                                  : view === "projects"
-                                    ? tr("项目")
-                                    : tr("任务 ID")}
-                              </th>
-                              <th>{tr("输入")}</th>
-                              <th>{tr("缓存")}</th>
-                              <th>{tr("输出")}</th>
-                              <th>{tr("等值 USD")}</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {data[view].map((r) => (
-                              <tr
-                                key={r.name}
-                                onClick={() =>
-                                  choose(
-                                    view === "models"
-                                      ? "model"
-                                      : view === "projects"
-                                        ? "project"
-                                        : "session",
-                                    r.name,
-                                  )
-                                }
-                              >
-                                <td>
-                                  <button className="table-link" title={r.name}>
-                                    {view === "projects"
-                                      ? shortPath(r.name)
-                                      : r.name}
-                                    {r.project && (
-                                      <small>{shortPath(r.project)}</small>
-                                    )}
-                                  </button>
-                                </td>
-                                <td>{full(r.input)}</td>
-                                <td>{full(r.cached)}</td>
-                                <td>{full(r.output)}</td>
-                                <td>
-                                  {r.unpriced === r.requests
-                                    ? tr("未定价")
-                                    : money(r.cost)}
-                                  {r.unpriced > 0 &&
-                                    r.unpriced < r.requests && (
-                                      <small>{tr("部分未定价")}</small>
-                                    )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        {!data[view].length && <Empty />}
-                      </div>
+                    <Panel title={tr("消耗明细")} meta={tr("共 {0} 条", data[view].length)}>
+                      <Breakdown
+                        rows={data[view]}
+                        view={view}
+                        setView={setView}
+                        choose={choose}
+                        resetKey={JSON.stringify(filter)}
+                        lang={lang}
+                      />
                     </Panel>
                   )}
                   <Panel title={tr("运行指标")}>
@@ -892,67 +1092,14 @@ function App() {
                   </Panel>
                   {page === "history" && (
                     <Panel title={tr("任务运行记录")} meta={tr("共 {0} 条", data.records?.total || 0)}>
-                      <div className="table-scroll">
-                        <table className="run-records">
-                          <thead>
-                            <tr>
-                              <th>{tr("开始时间 / 任务")}</th>
-                              <th>{tr("模型")}</th>
-                              <th>{tr("状态")}</th>
-                              <th>{tr("输入 Token")}</th>
-                              <th>{tr("输出 Token")}</th>
-                              <th>{tr("估算费用")}</th>
-                              <th>{tr("耗时")}</th>
-                              <th>{tr("首 Token")}</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {data.turns.map((t) => (
-                              <React.Fragment key={t.id}><tr>
-                                <td title={t.id}>
-                                  {date(t.started)}
-                                  <small>
-                                    {t.session.slice(0, 8)} ·{" "}
-                                    {shortPath(t.project)}
-                                  </small>
-                                </td>
-                                <td><button className="record-detail" onClick={()=>setExpanded(expanded===t.id?null:t.id)} aria-expanded={expanded===t.id}>
-                                  {t.models?.length>1 ? tr("{0} 个模型", t.models.length) : (t.models?.[0]?.model || t.model)}<small>{expanded===t.id?tr("收起明细"):tr("查看明细")}</small>
-                                </button></td>
-                                <td>
-                                  {
-                                    {
-                                      completed: tr("已完成"),
-                                      failed: tr("失败"),
-                                      aborted: tr("已取消"),
-                                      running: tr("未结束"),
-                                    }[t.status]
-                                  }
-                                </td>
-                                <td title={tr("缓存输入 {0} tokens", full(t.cached))}>{t.requests ? full(t.input) : "—"}<small>{recordMoney(t.inputCost, t)}</small></td>
-                                <td>{t.requests ? full(t.output) : "—"}<small>{recordMoney(t.outputCost, t)}</small></td>
-                                <td>{recordMoney(t.cost, t)}</td>
-                                <td>{duration(t.duration)}</td>
-                                <td>{duration(t.ttft)}</td>
-                              </tr>
-                              {expanded===t.id && <tr className="record-expanded"><td colSpan={8}>
-                                <div>{tr("完整任务 ·")}{t.id}</div>
-                                <div className="model-details">{t.models?.map(m=><div key={m.model}>
-                                  <strong>{m.model}</strong><span>{tr("输入 {0} · 缓存 {1} · 输出 {2}", full(m.input), full(m.cached), full(m.output))}</span>
-                                  <span>{tr("输入 {0} · 输出 {1} · 合计 {2}", recordMoney(m.inputCost,m), recordMoney(m.outputCost,m), recordMoney(m.cost,m))}</span>
-                                </div>)}</div>
-                                {!t.models?.length && <span>{tr("暂无用量记录")}</span>}
-                              </td></tr>}
-                              </React.Fragment>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="pagination">
-                        <button className="button" disabled={!data.records || data.records.page<=1} onClick={()=>{setRecordPage(data.records.page-1);setExpanded(null);}}>{tr("上一页")}</button>
-                        <span>{tr("第 {0} / {1} 页 · 每页 50 条", data.records?.page || 1, data.records?.pages || 1)}</span>
-                        <button className="button" disabled={!data.records || data.records.page>=data.records.pages} onClick={()=>{setRecordPage(data.records.page+1);setExpanded(null);}}>{tr("下一页")}</button>
-                      </div>
+                      <RunRecords
+                        turns={data.turns}
+                        records={data.records}
+                        expanded={expanded}
+                        setExpanded={setExpanded}
+                        setRecordPage={setRecordPage}
+                        lang={lang}
+                      />
                     </Panel>
                   )}
                 </>
@@ -969,7 +1116,7 @@ function App() {
                         title={q.bucket}
                         meta={q.plan?.toUpperCase()}
                       >
-                        <WindowQuota q={q} />
+                        <WindowQuota q={q} lang={lang} />
                       </Panel>
                     ))}
                   </div>
@@ -990,7 +1137,11 @@ function App() {
                       step
                       percent
                       label={tr("剩余额度历史曲线")}
+                      lang={lang}
                     />
+                    <div className="panel-note">
+                      {tr("额度属于当前登录账号，可能包含其他设备的用量；Token 统计仅覆盖本机 Codex 桌面端记录。")}
+                    </div>
                   </Panel>
                 </>
               )}
@@ -1068,7 +1219,7 @@ function Settings({ data, act, busy }) {
           <div>
             <b>{tr("主题")}</b>
           </div>
-          <div className="segmented">
+          <div className="segmented" role="group" aria-label={tr("主题")}>
             {[
               ["system", MonitorIcon, tr("系统")],
               ["light", Sun, tr("浅色")],

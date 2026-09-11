@@ -22,10 +22,34 @@ const defaults = {
   codexExecutable: "",
   clearedAt: null,
 };
+// Records process() can act on. "event_msg" is only listed through the payload
+// subtypes it handles; the other event_msg subtypes (item_completed,
+// thread_settings_applied, ...) are ignored by process() but dominate the byte
+// volume of a rollout, so JSON.parse is skipped for them.
+//
+// The trade-off is a CORPUS-MEASURED invariant, not a structural one: a line whose
+// deciding "type"/payload-type token falls beyond the 180-byte head below would be
+// silently skipped and counted in neither the usage nor the diagnostics. Measured
+// over 341 rollouts / 82,956 lines / 617.8 MiB of real Codex output: 18,520 records
+// matched, 0 of the 18,520 records process() consumes were dropped, 0 false
+// positives, and the furthest deciding token ended at byte 107 — a 73-byte margin.
+// Skipping is also why status.errors no longer reports malformed lines of ignored
+// subtypes (they are not parsed at all): a diagnostics-only change, no DB effect.
+const INTERESTING =
+  /"type"\s*:\s*"(session_meta|turn_context|token_usage_record|task_started|task_complete|turn_aborted|token_count)"/;
 
 class Store {
   constructor(file) {
     this.db = new DatabaseSync(file);
+    // One compiled statement per SQL text, reused for the life of the connection.
+    // node:sqlite recompiles on every prepare(), and the scan/record paths issue the
+    // same handful of statements once per row, so caching removes the compile cost
+    // from those loops. Nothing is shared between Store instances.
+    this.statements = new Map();
+    // Per-scan caches. All are null while no scan is running.
+    this.scanSettings = null;
+    this.accountMemo = null;
+    this.accountMemoByTime = null;
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY,value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY,offset INTEGER,state TEXT,mtime REAL);
@@ -81,8 +105,7 @@ class Store {
           output,
           write,
         ] of officialPrices.rates) {
-          const old = this.db
-            .prepare(
+          const old = this.sql(
               "SELECT id FROM prices WHERE model=? AND source=? AND input=? AND cached=? AND output=? AND cache_write=? AND retired=0",
             )
             .all(
@@ -95,11 +118,8 @@ class Store {
             );
           if (!old.length) continue;
           for (const row of old)
-            this.db
-              .prepare("UPDATE prices SET retired=1 WHERE id=?")
-              .run(row.id);
-          this.db
-            .prepare(
+            this.sql("UPDATE prices SET retired=1 WHERE id=?").run(row.id);
+          this.sql(
               "INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)",
             )
             .run(
@@ -123,8 +143,8 @@ class Store {
       this.db.exec("BEGIN");
       try {
         for (const [model,input,cached,output,write] of officialPrices.rates.filter(r => ["gpt-5.5","gpt-5.4"].includes(r[0]))) {
-          if (this.db.prepare("SELECT 1 FROM prices WHERE model=? AND retired=0").get(model)) continue;
-          this.db.prepare("INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)")
+          if (this.sql("SELECT 1 FROM prices WHERE model=? AND retired=0").get(model)) continue;
+          this.sql("INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)")
             .run(model,"1970-01-01T00:00:00.000Z",input,cached,output,write,"Standard 标准价 · 短上下文 · 官网核对 2026-09-10；历史按此基准估算");
         }
         this.set("legacy-model-prices-v1",true);
@@ -132,17 +152,44 @@ class Store {
       } catch(error) { this.db.exec("ROLLBACK"); throw error; }
     }
   }
+  // Reuse one compiled statement per SQL text. Callers must not start a second
+  // cursor from the same statement while an iterate() over it is still open.
+  sql(text) {
+    let stmt = this.statements.get(text);
+    if (!stmt) {
+      stmt = this.db.prepare(text);
+      this.statements.set(text, stmt);
+    }
+    return stmt;
+  }
+  exec(text) {
+    this.db.exec(text);
+  }
+  // Drop the cached settings snapshot. Call after any out-of-band kv write that
+  // touches "settings" so a later settings() re-reads it.
+  invalidateSettings() {
+    this.parsedSettings = null;
+    if (this.readCache) this.readCache.delete("settings");
+  }
   get(key) {
-    const row = this.db.prepare("SELECT value FROM kv WHERE key=?").get(key);
+    const row = this.sql("SELECT value FROM kv WHERE key=?").get(key);
     return row ? JSON.parse(row.value) : null;
   }
   set(key, value) {
-    this.db
-      .prepare("INSERT OR REPLACE INTO kv VALUES(?,?)")
-      .run(key, JSON.stringify(value));
+    this.sql("INSERT OR REPLACE INTO kv VALUES(?,?)").run(key, JSON.stringify(value));
+    if (key === "settings") this.invalidateSettings();
+    if (this.readCache) this.readCache.delete(key);
+  }
+  // Cached read for values this instance writes itself. Use only where the store
+  // instance is the single writer of that key (its own worker/timer loops).
+  peek(key) {
+    if (!this.readCache) this.readCache = new Map();
+    if (!this.readCache.has(key)) this.readCache.set(key, this.get(key));
+    return this.readCache.get(key);
   }
   settings() {
-    return { ...defaults, ...this.get("settings") };
+    if (!this.parsedSettings) this.parsedSettings = { ...defaults, ...this.get("settings") };
+    return { ...this.parsedSettings };
   }
   saveSettings(input) {
     const next = this.settings();
@@ -175,8 +222,7 @@ class Store {
         throw new Error("价格须为有限的非负数");
     const effective = iso(p.effective);
     if (!effective) throw new Error("生效时间无效");
-    this.db
-      .prepare(
+    this.sql(
         "INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)",
       )
       .run(
@@ -191,8 +237,7 @@ class Store {
     return this.prices();
   }
   prices() {
-    return this.db
-      .prepare(
+    return this.sql(
         "SELECT * FROM prices ORDER BY effective DESC, CASE WHEN source='手动设置' THEN 1 ELSE 0 END DESC, id DESC",
       )
       .all();
@@ -212,9 +257,8 @@ class Store {
         minutes = number(w.windowDurationMins ?? w.window_minutes),
         resets = number(w.resetsAt ?? w.resets_at);
       if (used === null || minutes === null) continue;
-      if (source === "日志" && this.db.prepare("SELECT 1 FROM quotas WHERE ts=? AND bucket=? AND slot=? AND used=? AND resets IS ? AND source=? LIMIT 1").get(ts,bucket,slot,Math.min(100,used),resets,source)) continue;
-      this.db
-        .prepare("INSERT OR IGNORE INTO quotas(id,ts,bucket,slot,used,minutes,resets,plan,source,account) VALUES(?,?,?,?,?,?,?,?,?,?)")
+      if (source === "日志" && this.sql("SELECT 1 FROM quotas WHERE ts=? AND bucket=? AND slot=? AND used=? AND resets IS ? AND source=? LIMIT 1").get(ts,bucket,slot,Math.min(100,used),resets,source)) continue;
+      this.sql("INSERT OR IGNORE INTO quotas(id,ts,bucket,slot,used,minutes,resets,plan,source,account) VALUES(?,?,?,?,?,?,?,?,?,?)")
         .run(
           hash([account, ts, bucket, slot, used, resets].join("|")),
           ts,
@@ -238,13 +282,14 @@ class Store {
       s.desktop = p.originator === "Codex Desktop";
       s.project = p.cwd || "未归属项目";
       if (s.desktop && s.session)
-        this.db
-          .prepare("INSERT OR IGNORE INTO sessions VALUES(?,?,?,?)")
+        this.sql("INSERT OR IGNORE INTO sessions VALUES(?,?,?,?)")
           .run(s.session, s.project, "Codex Desktop", ts);
       return;
     }
     if (!s.desktop || !s.session) return;
-    const cleared = this.settings().clearedAt,
+    // Within a scan the clear boundary cannot move: writes are serialized behind
+    // the scan transaction. Outside a scan, re-read so an out-of-band clear is seen.
+    const cleared = (this.scanSettings || this.settings()).clearedAt,
       allowed = !cleared || ts > cleared;
     if (o.type === "turn_context") {
       s.model = p.model || "unknown";
@@ -256,8 +301,7 @@ class Store {
         s.turn = p.turn_id || hash(s.session + ts);
         s.modern = false;
         if (allowed)
-          this.db
-            .prepare("INSERT OR IGNORE INTO turns(id,session,model,started,ended,status,duration,ttft,last_seen,account) VALUES(?,?,?,?,?,?,?,?,?,?)")
+          this.sql("INSERT OR IGNORE INTO turns(id,session,model,started,ended,status,duration,ttft,last_seen,account) VALUES(?,?,?,?,?,?,?,?,?,?)")
             .run(
               s.turn,
               s.session,
@@ -274,8 +318,7 @@ class Store {
       if (p.type === "task_complete" || p.type === "turn_aborted") {
         const id = p.turn_id || s.turn;
         if (allowed && id) {
-          this.db
-            .prepare(
+          this.sql(
               "UPDATE turns SET ended=?,status=?,duration=?,ttft=?,model=?,last_seen=? WHERE id=?",
             )
             .run(
@@ -298,6 +341,11 @@ class Store {
         const total = p.info?.total_token_usage;
         if (total) {
           if (!s.modern && allowed) {
+            // prev is s.total, i.e. the previous token_count total within THIS rollout.
+            // s.total is already in memory, so no cache is needed or safe here: it is
+            // also updated by the token_usage_record branch below, and a cache refreshed
+            // in only one of those branches would go stale and mis-book the cumulative
+            // total as fresh usage.
             const prev = s.total;
             const usage = {};
             for (const k of [
@@ -339,13 +387,36 @@ class Store {
         );
     }
   }
+  // Attribution of a stored usage row — byte-for-byte the expression the shipped code
+  // used: the existing row's account if a row with this id is already stored, otherwise
+  // accountAt(ts). A re-scan re-inserts ids that are already present, so both halves are
+  // memoized per scan: the point lookup by usage id, the accountAt(ts) fallback by
+  // timestamp (it depends on nothing else). Both memoized answers are the values the
+  // unmemoized expression would have produced.
+  storedAccount(id, ts) {
+    if (!this.accountMemo) {
+      return this.sql("SELECT account FROM usage WHERE id=?").get(id)?.account || accountAt(this, ts);
+    }
+    let entry = this.accountMemo.get(id);
+    if (entry === undefined) {
+      const stored = this.sql("SELECT account FROM usage WHERE id=?").get(id)?.account;
+      entry = { stored, fallback: stored ? null : undefined };
+      this.accountMemo.set(id, entry);
+    }
+    if (entry.stored) return entry.stored;
+    if (entry.fallback === undefined) {
+      const byTime = this.accountMemoByTime.get(ts);
+      entry.fallback = byTime === undefined ? accountAt(this, ts) : byTime;
+      this.accountMemoByTime.set(ts, entry.fallback);
+    }
+    return entry.fallback;
+  }
   addUsage(id, u, ts, s, kind) {
     const input = number(u.input_tokens),
       output = number(u.output_tokens),
       cached = number(u.cached_input_tokens) ?? 0;
     if (input === null || output === null || cached > input) return;
-    this.db
-      .prepare(`INSERT OR ${this.replayingRecovered ? "REPLACE" : "IGNORE"} INTO usage(id,session,turn,ts,model,input,cached,output,reasoning,cache_write,kind,account) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    this.sql(`INSERT OR ${this.replayingRecovered ? "REPLACE" : "IGNORE"} INTO usage(id,session,turn,ts,model,input,cached,output,reasoning,cache_write,kind,account) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(
         id,
         s.session,
@@ -358,16 +429,19 @@ class Store {
         number(u.reasoning_output_tokens) ?? 0,
         number(u.cache_write_input_tokens) ?? 0,
         kind,
-        this.db.prepare("SELECT account FROM usage WHERE id=?").get(id)?.account || accountAt(this, ts),
+        this.storedAccount(id, ts),
       );
     if (s.turn)
-      this.db
-        .prepare("UPDATE turns SET model=?,last_seen=? WHERE id=?")
-        .run(s.model || "unknown", ts, s.turn);
+      this.sql("UPDATE turns SET model=?,last_seen=? WHERE id=?").run(s.model || "unknown", ts, s.turn);
   }
   async scan(home, onProgress = () => {}, options = {}) {
     observeAccount(this, home);
     this.replayingRecovered = !!this.get("replayRecovered");
+    // Per-scan caches. Writes are serialized behind the scan transaction, so the
+    // clear boundary cannot move under it and already-seen rows cannot change.
+    this.scanSettings = this.settings();
+    this.accountMemo = new Map();
+    this.accountMemoByTime = new Map();
     const now = Date.now();
     const full = options.full || !this.catalog || this.catalogHome !== home || now - this.lastDiscovery >= 60000;
     if(full) { this.catalog = new Map(); this.catalogHome=home; }
@@ -409,7 +483,7 @@ class Store {
         continue;
       }
       this.catalog.set(file,st.mtimeMs);
-      const old = this.db.prepare("SELECT * FROM files WHERE path=?").get(file);
+      const old = this.sql("SELECT * FROM files WHERE path=?").get(file);
       if (old && old.offset === st.size && old.mtime === st.mtimeMs) {
         scanned++;
         continue;
@@ -418,8 +492,7 @@ class Store {
       let offset = old && old.offset <= st.size ? old.offset : 0;
       const state = offset && old ? JSON.parse(old.state) : {};
       if (state.desktop === false && offset) {
-        this.db
-          .prepare("UPDATE files SET offset=?,mtime=? WHERE path=?")
+        this.sql("UPDATE files SET offset=?,mtime=? WHERE path=?")
           .run(st.size, st.mtimeMs, file);
         scanned++;
         continue;
@@ -439,12 +512,10 @@ class Store {
             offset += index - start + 1;
             start = index + 1;
             // Only statistical records are parsed. Message and tool bodies are never stored.
+            // The head is already decoded for dispatch, so it is also used to reject the
+            // event_msg subtypes process() would ignore before paying for JSON.parse.
             const head = line.subarray(0, 180).toString("utf8");
-            if (
-              /"type"\s*:\s*"(session_meta|turn_context|event_msg|token_usage_record)"/.test(
-                head,
-              )
-            ) {
+            if (INTERESTING.test(head)) {
               try {
                 this.process(JSON.parse(line.toString("utf8")), state);
               } catch {
@@ -454,8 +525,7 @@ class Store {
           }
           pending = data.subarray(start);
         }
-        this.db
-          .prepare("INSERT OR REPLACE INTO files VALUES(?,?,?,?)")
+        this.sql("INSERT OR REPLACE INTO files VALUES(?,?,?,?)")
           .run(file, offset, JSON.stringify(state), st.mtimeMs);
         this.db.exec("COMMIT");
       } catch {
@@ -467,10 +537,10 @@ class Store {
     }
     // Records appended while a scan was in progress may be read after the observation boundary.
     // On the next observation, attach only timestamps within this verified interval.
-    const observation = this.db.prepare("SELECT * FROM account_observations WHERE id=?").get(this.observationId);
+    const observation = this.sql("SELECT * FROM account_observations WHERE id=?").get(this.observationId);
     if (observation?.account !== UNKNOWN) {
       for (const [table,time] of [["usage","ts"],["turns","started"],["quotas","ts"]])
-        this.db.prepare(`UPDATE ${table} SET account=? WHERE account=? AND ${time}>=? AND ${time}<=?`).run(observation.account,UNKNOWN,observation.started,observation.ended);
+        this.sql(`UPDATE ${table} SET account=? WHERE account=? AND ${time}>=? AND ${time}<=?`).run(observation.account,UNKNOWN,observation.started,observation.ended);
     }
     const status = {
       scanned,
@@ -486,6 +556,9 @@ class Store {
     this.set("scan", status);
     if (this.replayingRecovered && !errors) this.set("replayRecovered",false);
     this.replayingRecovered = false;
+    this.scanSettings = null;
+    this.accountMemo = null;
+    this.accountMemoByTime = null;
     return status;
   }
   clear() {

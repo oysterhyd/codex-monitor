@@ -30,46 +30,59 @@ function migrateAccounts(store) {
 function observeAccount(store, home, now = new Date().toISOString()) {
   const account = readAccount(home);
   const id = account?.id || UNKNOWN;
-  if (account) store.db.prepare('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').run(id, account.label, 'detected');
+  if (account) store.sql('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').run(id, account.label, 'detected');
   // Resume the persisted interval when the observed identity is unchanged.
   // A real identity change (including logout) still starts a separate interval.
-  const previous = store.db.prepare('SELECT * FROM account_observations ORDER BY id DESC LIMIT 1').get();
+  const previous = store.sql('SELECT * FROM account_observations ORDER BY id DESC LIMIT 1').get();
   if (previous?.account === id && now >= previous.ended) {
     store.observationId = previous.id;
-    store.db.prepare('UPDATE account_observations SET ended=? WHERE id=?').run(now, previous.id);
+    store.sql('UPDATE account_observations SET ended=? WHERE id=?').run(now, previous.id);
   } else {
-    store.observationId = Number(store.db.prepare('INSERT INTO account_observations(account,started,ended) VALUES(?,?,?)').run(id, now, now).lastInsertRowid);
+    store.observationId = Number(store.sql('INSERT INTO account_observations(account,started,ended) VALUES(?,?,?)').run(id, now, now).lastInsertRowid);
   }
   store.observedAccount = id;
   store.lastAccountObservation = Date.parse(now);
+  // The cached interval list must not serve stale answers for a new interval.
+  store.accountIntervals = null;
   store.set('currentAccount', id);
   return id;
 }
 function accountAt(store, ts) {
-  return store.db.prepare('SELECT account FROM account_observations WHERE started<=? AND ended>=? ORDER BY id DESC LIMIT 1').get(ts, ts)?.account || UNKNOWN;
+  // One query per record is an N+1 over the record path. The interval list is small
+  // and loaded once per observation, then resolved in memory with the same IN
+  // semantics; the SQL fallback keeps ad-hoc calls identical.
+  let intervals = store.accountIntervals;
+  if (intervals === undefined || intervals === null) {
+    intervals = store.sql('SELECT account,started,ended FROM account_observations ORDER BY id DESC').all();
+    store.accountIntervals = intervals;
+  }
+  for (const row of intervals) {
+    if (row.started <= ts && row.ended >= ts) return row.account || UNKNOWN;
+  }
+  return UNKNOWN;
 }
 function saveAccount(store, input) {
   const label = typeof input?.label === 'string' ? input.label.trim() : '';
   if (!label || label.length > 100) throw new Error('账号名称须为 1–100 个字符');
   const id = input.id || crypto.randomUUID();
-  if (input.id && !store.db.prepare('SELECT id FROM accounts WHERE id=?').get(id)) throw new Error('账号不存在');
-  store.db.prepare('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET label=excluded.label').run(id, label, 'manual');
+  if (input.id && !store.sql('SELECT id FROM accounts WHERE id=?').get(id)) throw new Error('账号不存在');
+  store.sql('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET label=excluded.label').run(id, label, 'manual');
   return { id, label };
 }
 function assignUnknown(store, input) {
   const { bounds } = require('./metrics.cjs');
-  if (!store.db.prepare('SELECT id FROM accounts WHERE id=?').get(input.account)) throw new Error('账号不存在');
+  if (!store.sql('SELECT id FROM accounts WHERE id=?').get(input.account)) throw new Error('账号不存在');
   const { start, end } = bounds(input);
   store.db.exec('BEGIN');
   try {
     let count = 0;
     if (input.turn && input.session) {
-      count += store.db.prepare('UPDATE usage SET account=? WHERE turn=? AND session=?').run(input.account,input.turn,input.session).changes;
-      count += store.db.prepare('UPDATE turns SET account=? WHERE id=? AND session=?').run(input.account,input.turn,input.session).changes;
+      count += store.sql('UPDATE usage SET account=? WHERE turn=? AND session=?').run(input.account,input.turn,input.session).changes;
+      count += store.sql('UPDATE turns SET account=? WHERE id=? AND session=?').run(input.account,input.turn,input.session).changes;
       store.db.exec('COMMIT'); return count;
     }
     for (const [table, time] of [['usage','ts'],['turns','started'],['quotas','ts']])
-      count += store.db.prepare(`UPDATE ${table} SET account=? WHERE account=? AND ${time}>=? AND ${time}<?`).run(input.account, UNKNOWN, start, end).changes;
+      count += store.sql(`UPDATE ${table} SET account=? WHERE account=? AND ${time}>=? AND ${time}<?`).run(input.account, UNKNOWN, start, end).changes;
     store.db.exec('COMMIT'); return count;
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
 }

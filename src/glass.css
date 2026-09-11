@@ -1,7 +1,7 @@
 :root {
   --bg: #eaf3f8; --sidebar: #e7eff4; --panel: #ffffffd9;
   --text: #102237; --muted: #596e84; --border: #d5e3ed;
-  --hover: #e5eff3; --accent: #00876d; --accent-soft: #d5f5eb;
+  --hover: #e5eff3; --accent: #00785e; --accent-soft: #d5f5eb;
   --accent-border: #98dccc; --blue: #416bd3; --amber: #926018;
   --glass: #f5fbff99; --glass-edge: #ffffffed; --shadow: #366c9410;
 }
@@ -77,7 +77,8 @@ button:active:not(:disabled) { transform: scale(.97); }
 .widget-switch input[type="checkbox"]:before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px #10223725; transition: transform 260ms cubic-bezier(.34,1.45,.44,1); }
 .widget-switch input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
 .widget-switch input[type="checkbox"]:checked:before { transform: translateX(16px); }
-.app { will-change: opacity, transform; }
+/* Promote only while the enter/morph animations actually run. */
+.app-to-widget, .app-enter { will-change: opacity, transform; }
 .app-to-widget { opacity: 0; transform: translateY(10px) scale(.985); pointer-events: none; transition: opacity 180ms cubic-bezier(.4,0,1,1), transform 180ms cubic-bezier(.4,0,1,1); }
 .app-enter { animation: app-enter 340ms cubic-bezier(.22,1,.36,1); }
 @keyframes app-enter { from { opacity: 0; transform: translateY(10px) scale(.988); } to { opacity: 1; transform: none; } }
@@ -115,3 +116,16 @@ button:active:not(:disabled) { transform: scale(.97); }
 .chart-scene { animation: chart-scene-enter 360ms ease-out both; }
 @keyframes chart-scene-enter { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 600px) { .chart-minor-tick { display: none; } }
+
+/* Honour the OS motion preference exactly as widget.css:78 does for the widget: the
+   main window's page enter, app enter/exit, lens slides, chart reveal, quota fill and
+   hover lifts all run off these declarations. */
+@media (prefers-reduced-motion: reduce) {
+  .app, .app * { animation: none !important; transition: none !important; }
+  .metric:hover, .panel:hover { transform: none; }
+  .metric:active:not(:disabled), button:active:not(:disabled) { transform: none; }
+  .nav-lens, .range-lens { transition: none; }
+  /* Nothing animates here, so never keep a compositor layer promoted for motion: with the
+     animations suppressed an enter class can also outlive its animationend (see enter()). */
+  .app-to-widget, .app-enter { will-change: auto; }
+}

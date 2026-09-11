@@ -17,6 +17,49 @@ function costOf(row, prices) {
     priceId: p.id,
   };
 }
+// costOf() needs the latest non-retired price per model whose effective date has
+// already passed. store.prices() is ordered so that this is the first match, which
+// lets the scan stop at the first hit instead of walking the whole price history
+// for every usage row. Input order is preserved so ties resolve identically.
+function priceIndex(prices) {
+  const index = new Map();
+  for (const p of prices) {
+    if (p.retired) continue;
+    const bucket = index.get(p.model);
+    if (bucket) bucket.push(p);
+    else index.set(p.model, [p]);
+  }
+  return index;
+}
+function pickPrice(bucket, ts) {
+  // prices() is ordered effective DESC, and the original prices.find() returned the
+  // FIRST element satisfying the predicate, i.e. the most recent applicable price.
+  // Scanning forwards preserves that; scanning backwards would pick the oldest one.
+  for (let i = 0; i < bucket.length; i++) {
+    if (bucket[i].effective <= ts) return bucket[i];
+  }
+  return null;
+}
+function costWith(row, prices, index) {
+  const bucket = index && index.get(row.model);
+  const p = bucket ? pickPrice(bucket, row.ts) : prices.find(
+    (p) => !p.retired && p.model === row.model && p.effective <= row.ts,
+  );
+  if (!p) return { cost: null, inputCost: null, outputCost: null, saved: null, priceId: null };
+  const plain = Math.max(0, row.input - row.cached - row.cache_write);
+  return {
+    inputCost: (plain * p.input + row.cached * p.cached + row.cache_write * p.cache_write) / 1e6,
+    outputCost: row.output * p.output / 1e6,
+    cost:
+      (plain * p.input +
+        row.cached * p.cached +
+        row.cache_write * p.cache_write +
+        row.output * p.output) /
+      1e6,
+    saved: (row.cached * (p.input - p.cached)) / 1e6,
+    priceId: p.id,
+  };
+}
 function bounds(filter = {}, now = new Date()) {
   let start = new Date(now.getFullYear(), now.getMonth(), now.getDate()),
     end = new Date(start);
@@ -53,18 +96,32 @@ function summarize(store, filter = {}) {
   const analytics = ['all', 'overview', 'history'].includes(page);
   const recordsWanted = ['all', 'history'].includes(page);
   const historyWanted = ['all', 'quota'].includes(page);
+  // options.models / options.projects are only rendered by the overview and
+  // history pages; options.sessions additionally by the settings page. The quota
+  // page reads none of them, yet DISTINCT model is a full scan of usage.
+  const optionsWanted = ['all', 'overview', 'history', 'settings'].includes(page);
+  const breakdownWanted = ['all', 'overview', 'history'].includes(page);
   const pageSize = Math.max(1, Math.min(200, Math.floor(Number(filter.pageSize) || 200)));
   const requestedPage = Math.max(1, Math.floor(Number(filter.recordPage) || 1));
   const prices = store.prices();
-  const sessions = store.db.prepare("SELECT * FROM sessions").all(),
+  const pricesByModel = priceIndex(prices);
+  const sessions = store.sql("SELECT * FROM sessions").all(),
     sessionMap = new Map(sessions.map((s) => [s.id, s]));
   // Resolve account membership once, rather than querying each session twice per snapshot.
   const accountSessions = filter.account
-    ? new Set(store.db.prepare("SELECT DISTINCT session FROM usage WHERE account=?").all(filter.account).map(r => r.session))
+    ? new Set(store.sql("SELECT DISTINCT session FROM usage WHERE account=?").all(filter.account).map(r => r.session))
     : null;
   const availableSessions = accountSessions ? sessions.filter(s => accountSessions.has(s.id)) : sessions;
+  // Account membership for the running-turn list is resolved in SQL, not here (see the note on
+  // the `activeTurns` query below). A set built from `SELECT DISTINCT turn,session FROM usage
+  // WHERE account=?` would be planned as a walk of every row the account owns plus a temp B-tree,
+  // regardless of any turn IN (...) scoping, so it costs O(account rows) on every account-filtered
+  // snapshot; pushing the predicate onto the running turns instead makes each lookup an indexed
+  // probe on usage_turn_session, and costs nothing at all when no turn is running.
+  // This predicate therefore tests only the remaining dimensions - it must NOT re-test account,
+  // because a turn's own row can legitimately carry a different account from the usage written
+  // under it.
   const accepts = (r) =>
-    (!filter.account || r.account === filter.account || store.db.prepare("SELECT 1 FROM usage WHERE turn=? AND session=? AND account=? LIMIT 1").get(r.id,r.session,filter.account)) &&
     (!filter.model || r.model === filter.model) &&
     (!filter.project ||
       sessionMap.get(r.session)?.project === filter.project) &&
@@ -74,13 +131,13 @@ function summarize(store, filter = {}) {
   for (const [key, column] of [['account','u.account'], ['model','u.model'], ['session','u.session'], ['project','s.project']]) {
     if (filter[key]) { conditions.push(`${column}=?`); params.push(filter[key]); }
   }
-  const rows = analytics ? store.db.prepare(`SELECT u.* FROM usage u LEFT JOIN sessions s ON s.id=u.session WHERE ${conditions.join(' AND ')} ORDER BY u.ts`).all(...params) : [];
+  const rows = analytics ? store.sql(`SELECT u.* FROM usage u LEFT JOIN sessions s ON s.id=u.session WHERE ${conditions.join(' AND ')} ORDER BY u.ts`).all(...params) : [];
   const turnConditions=['t.started>=?','t.started<?'], turnParams=[start,end];
   if(filter.account) {turnConditions.push('(t.account=? OR EXISTS (SELECT 1 FROM usage u WHERE u.turn=t.id AND u.session=t.session AND u.account=?))');turnParams.push(filter.account,filter.account);}
   if(filter.model) {turnConditions.push('(t.model=? OR EXISTS (SELECT 1 FROM usage u WHERE u.turn=t.id AND u.session=t.session AND u.model=?))');turnParams.push(filter.model,filter.model);}
   if(filter.session){turnConditions.push('t.session=?');turnParams.push(filter.session);}
   if(filter.project){turnConditions.push('s.project=?');turnParams.push(filter.project);}
-  const turns = analytics ? store.db.prepare(`SELECT t.* FROM turns t LEFT JOIN sessions s ON s.id=t.session WHERE ${turnConditions.join(' AND ')} ORDER BY t.started DESC,t.id DESC`).all(...turnParams) : [];
+  const turns = analytics ? store.sql(`SELECT t.* FROM turns t LEFT JOIN sessions s ON s.id=t.session WHERE ${turnConditions.join(' AND ')} ORDER BY t.started DESC,t.id DESC`).all(...turnParams) : [];
   const sums = {
     input: 0,
     cached: 0,
@@ -98,8 +155,15 @@ function summarize(store, filter = {}) {
     tasks = {},
     timeline = {};
   const hourly = filter.range === "today" || !filter.range;
+  // The breakdown maps (and the per-row local-date bucketing) are only rendered by
+  // the overview and history pages, so they are skipped for settings/quota pages.
+  const accumulators = [];
+  if (breakdownWanted) {
+    accumulators.push([models, r => r.model], [projects, r => sessionMap.get(r.session)?.project || "未归属项目"], [tasks, r => r.session]);
+  }
+  accumulators.push([timeline, r => bucketOf(r.ts, hourly)]);
   for (const r of rows) {
-    const c = costOf(r, prices);
+    const c = costWith(r, prices, pricesByModel);
     Object.assign(r, c);
     sums.requests++;
     if (r.kind !== "逐次记录") sums.legacyRequests++;
@@ -110,13 +174,8 @@ function summarize(store, filter = {}) {
       sums.cost += c.cost;
       sums.saved += c.saved;
     }
-    const project = sessionMap.get(r.session)?.project || "未归属项目";
-    for (const [map, key] of [
-      [models, r.model],
-      [projects, project],
-      [tasks, r.session],
-      [timeline, bucketOf(r.ts, hourly)],
-    ]) {
+    for (const [map, keyOf] of accumulators) {
+      const key = keyOf(r);
       map[key] ??= {
         name: key,
         total: 0,
@@ -145,13 +204,13 @@ function summarize(store, filter = {}) {
   const selectedTurns = recordsWanted ? turns.slice((recordPage - 1) * pageSize, recordPage * pageSize) : [];
   const usageByTurn = new Map(), outputByTurn = new Map();
   if (analytics) {
-    for (const r of store.db.prepare(`SELECT t.id, COALESCE(SUM(u.output),0) output FROM turns t
+    for (const r of store.sql(`SELECT t.id, COALESCE(SUM(u.output),0) output FROM turns t
       LEFT JOIN usage u ON u.turn=t.id AND u.session=t.session ${filter.account ? 'AND u.account=?' : ''}
       WHERE t.started>=? AND t.started<? GROUP BY t.id`).iterate(...(filter.account ? [filter.account,start,end] : [start,end]))) outputByTurn.set(r.id,r.output);
   }
   if (selectedTurns.length) {
     const ids = selectedTurns.map(t=>t.id);
-    for (const r of store.db.prepare(`SELECT u.* FROM usage u JOIN turns t ON t.id=u.turn AND t.session=u.session
+    for (const r of store.sql(`SELECT u.* FROM usage u JOIN turns t ON t.id=u.turn AND t.session=u.session
       WHERE t.id IN (${ids.map(()=>'?').join(',')}) ORDER BY u.ts`).iterate(...ids)) {
       if (filter.account && r.account !== filter.account) continue;
       if (!usageByTurn.has(r.turn)) usageByTurn.set(r.turn,[]);
@@ -162,7 +221,7 @@ function summarize(store, filter = {}) {
   const add = (total,row) => {
     total.requests++;
     for(const key of ['input','cached','output']) total[key]+=row[key];
-    const price=costOf(row,prices);
+    const price=costWith(row,prices,pricesByModel);
     if(price.cost===null) total.unpriced++;
     else for(const key of ['inputCost','outputCost','cost']) total[key]+=price[key];
   };
@@ -182,26 +241,36 @@ function summarize(store, filter = {}) {
   const speeds = timed.map(t=>({...t,output:outputByTurn.get(t.id)||0})).filter(t=>t.output>0);
   const duration = speeds.reduce((s, t) => s + t.duration, 0),
     output = speeds.reduce((s, t) => s + t.output, 0);
-  const active = store.db
-    .prepare("SELECT * FROM turns WHERE status='running' AND last_seen>=?")
-    .all(new Date(Date.now() - 120000).toISOString())
-    .filter(accepts);
+  // Running turns. The account predicate carries BOTH disjuncts the shipped filter used: a turn
+  // counts when its OWN row carries the account, or when a usage row for that (turn,session)
+  // does. Dropping the first half silently loses turns that have no usage row under the filtered
+  // account (verified: pristine activeForA 4 vs 2 without it). Both halves are index-friendly -
+  // the first is a column test on turns, the second seeks usage_turn_session - so this stays an
+  // indexed probe per running turn and costs nothing at all when no turn is running.
+  // `accepts` below must NOT re-test account, or the first half would be filtered out again.
+  const captureCutoff = new Date(Date.now() - 120000).toISOString();
+  const activeTurns = store.sql(`SELECT t.* FROM turns t WHERE t.status='running' AND t.last_seen>=?
+      AND (? IS NULL OR t.account=?
+        OR EXISTS (SELECT 1 FROM usage u WHERE u.turn=t.id AND u.session=t.session AND u.account=?))
+    ORDER BY t.started DESC,t.id DESC`)
+    .all(captureCutoff, filter.account || null, filter.account || null, filter.account || null);
+  const active = activeTurns.filter(accepts);
   const quotaAccount = filter.account || store.get('currentAccount') || 'unassigned';
   const quotaWhere = 'account=? AND ';
   const quotaParams = [quotaAccount];
   const analyticsAccountParams = filter.account ? [filter.account] : [];
-  const latest = store.db.prepare(`SELECT q.* FROM
+  const latest = store.sql(`SELECT q.* FROM
     (SELECT DISTINCT account,bucket,slot FROM quotas WHERE account=?) b JOIN quotas q ON q.rowid=(
       SELECT rowid FROM quotas WHERE account=b.account AND bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)
     `).all(...quotaParams);
   const history = [];
   let historySamples = 0;
   if(historyWanted) {
-    const extent = store.db.prepare(`SELECT MIN(ts) first,MAX(ts) last FROM quotas WHERE ${quotaWhere}ts>=? AND ts<?`).get(...quotaParams,start,end);
+    const extent = store.sql(`SELECT MIN(ts) first,MAX(ts) last FROM quotas WHERE ${quotaWhere}ts>=? AND ts<?`).get(...quotaParams,start,end);
     const width = Math.max(1,(Date.parse(extent.last)-Date.parse(extent.first))/150);
     const bins = new Map(), previousByWindow = new Map(), gapEdges = new Map();
 
-    for(const q of store.db.prepare(`SELECT * FROM quotas WHERE ${quotaWhere}ts>=? AND ts<? ORDER BY ts`).iterate(...quotaParams,start,end)) {
+    for(const q of store.sql(`SELECT * FROM quotas WHERE ${quotaWhere}ts>=? AND ts<? ORDER BY ts`).iterate(...quotaParams,start,end)) {
       historySamples++;
       const windowKey = `${q.account}:${q.bucket}:${q.slot}`;
       const previous = previousByWindow.get(windowKey);
@@ -225,7 +294,12 @@ function summarize(store, filter = {}) {
     history.push(...[...points.values()].sort((a,b)=>a.ts.localeCompare(b.ts)));
   }
   const rank = (map) => Object.values(map).sort((a, b) => b.total - a.total);
-  const latestSpeed = speeds[0];
+  // turns is ordered started DESC, id DESC, so the first turn with recorded output is
+  // the newest speed sample — the same row the previous in-memory scan picked.
+  let latestSpeed = null;
+  for (const t of timed) {
+    if (outputByTurn.get(t.id) > 0) { latestSpeed = { ...t, output: outputByTurn.get(t.id) }; break; }
+  }
   return {
     range: { start, end },
     sums: {
@@ -283,17 +357,21 @@ function summarize(store, filter = {}) {
     scan: store.get("scan"),
     quotaStatus: store.get("quotaStatus")?.account === quotaAccount ? store.get("quotaStatus") : null,
     currentAccount: store.get("currentAccount"),
-    accounts: store.db.prepare("SELECT * FROM accounts ORDER BY label,id").all(),
-    coverage: store.db
-      .prepare(`SELECT MIN(ts) first,MAX(ts) last,COUNT(*) records FROM usage ${filter.account ? "WHERE account=?" : ""}`)
+    accounts: store.sql("SELECT * FROM accounts ORDER BY label,id").all(),
+    coverage: store.sql(`SELECT MIN(ts) first,MAX(ts) last,COUNT(*) records FROM usage ${filter.account ? "WHERE account=?" : ""}`)
       .get(...analyticsAccountParams),
     options: {
-      models: store.db
-        .prepare(`SELECT DISTINCT model FROM usage ${filter.account ? "WHERE account=?" : ""} ORDER BY model`)
-        .all(...analyticsAccountParams)
-        .map((r) => r.model),
-      projects: [...new Set(availableSessions.map((s) => s.project))].sort(),
-      sessions: availableSessions.map((s) => ({ id: s.id, project: s.project })),
+      models: optionsWanted
+        ? store.sql(`SELECT DISTINCT model FROM usage ${filter.account ? "WHERE account=?" : ""} ORDER BY model`)
+          .all(...analyticsAccountParams)
+          .map((r) => r.model)
+        : [],
+      projects: optionsWanted
+        ? [...new Set(availableSessions.map((s) => s.project))].sort()
+        : [],
+      sessions: optionsWanted
+        ? availableSessions.map((s) => ({ id: s.id, project: s.project }))
+        : [],
     },
     settings: store.settings(),
     prices,
@@ -334,18 +412,21 @@ function exportRows(store, filter) {
   if (filter.account === "current") filter = {...filter, account: store.get("currentAccount") || "unassigned"};
   const { start, end } = bounds(filter),
     prices = store.prices();
-  return store.db
-    .prepare(
-      "SELECT u.*,s.project FROM usage u LEFT JOIN sessions s ON s.id=u.session WHERE ts>=? AND ts<? ORDER BY ts",
+  const pricesByModel = priceIndex(prices);
+  // Same predicates the previous JS .filter() applied, pushed into SQL so the whole
+  // date range is no longer materialised before being discarded. The project
+  // predicate lives in the JOIN's ON clause to keep the LEFT JOIN from dropping
+  // rows whose session is missing or has a NULL project.
+  const conditions = ['u.ts>=?', 'u.ts<?'],
+    params = [start, end];
+  if (filter.account) { conditions.push('u.account=?'); params.push(filter.account); }
+  if (filter.model) { conditions.push('u.model=?'); params.push(filter.model); }
+  if (filter.session) { conditions.push('u.session=?'); params.push(filter.session); }
+  if (filter.project) { conditions.push('s.project=?'); params.push(filter.project); }
+  return store.sql(
+      `SELECT u.*,s.project FROM usage u LEFT JOIN sessions s ON s.id=u.session${filter.project ? ' AND s.project=?' : ''} WHERE ${conditions.join(' AND ')} ORDER BY u.ts`,
     )
-    .all(start, end)
-    .filter(
-      (r) =>
-        (!filter.account || r.account === filter.account) &&
-        (!filter.model || r.model === filter.model) &&
-        (!filter.project || r.project === filter.project) &&
-        (!filter.session || r.session === filter.session),
-    )
-    .map((r) => ({ ...r, ...costOf(r, prices) }));
+    .all(...(filter.project ? [filter.project, ...params] : params))
+    .map((r) => ({ ...r, ...costWith(r, prices, pricesByModel) }));
 }
 module.exports = { costOf, bounds, summarize, csv, exportRows, bucketOf };
