@@ -23,7 +23,11 @@
 }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", sans-serif; background: radial-gradient(ellipse at 74% 10%, color-mix(in srgb, var(--accent-soft) 75%, transparent), transparent 48%), radial-gradient(ellipse at 0 65%, #80baff19, transparent 60%), var(--bg); background-attachment: fixed; }
 .app { display: block; }
-main { width: 100%; margin-left: 0; }
+/* The page enter slides the content in from the left or right edge, so the 16px overhang
+   of the transition must not extend the document's scrollable area (a horizontal
+   scrollbar flash, and scripts/i18n-check.cjs asserts scrollWidth <= innerWidth during
+   exactly this window). `clip` and not `hidden`: it must not become a scroll container. */
+main { width: 100%; margin-left: 0; overflow-x: clip; }
 .topbar { position: sticky; top: 0; z-index: 20; display: grid; grid-template-columns: 1fr auto 1fr; gap: 20px; height: 84px; padding: 0 28px; background: var(--glass); border-bottom: 1px solid var(--glass-edge); backdrop-filter: blur(24px) saturate(150%); }
 .brand { margin: 0; gap: 10px; white-space: nowrap; font-size: 18px; }
 .brand img { width: 44px; height: 44px; border-radius: 14px; object-fit: cover; }
@@ -32,22 +36,30 @@ main { width: 100%; margin-left: 0; }
 .glass-nav button { position: relative; justify-content: center; gap: 9px; min-height: 44px; padding: 9px 20px; border-radius: 999px; font-size: 14px; white-space: nowrap; color: var(--muted); background: transparent; }
 .glass-nav button.selected { color: var(--accent); background: transparent; font-weight: 650; }
 .glass-nav button:hover { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
-.nav-lens { position: absolute; z-index: -1; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 4); transform: translateX(calc(var(--active-index) * 100%)); border-radius: 999px; background: linear-gradient(150deg, var(--panel), var(--accent-soft)); border: 2px solid var(--glass-edge); box-shadow: inset 0 1px 5px var(--glass-edge), 0 4px 12px var(--shadow); transition: transform 420ms cubic-bezier(.22,1,.36,1); }
+.nav-lens { position: absolute; z-index: -1; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 4); transform: translateX(calc(var(--active-index) * 100%)); border-radius: 999px; background: linear-gradient(150deg, var(--panel), var(--accent-soft)); border: 2px solid var(--glass-edge); box-shadow: inset 0 1px 5px var(--glass-edge), 0 4px 12px var(--shadow); transition: transform var(--dur-slow) var(--ease-out); }
 .header-actions { justify-self: end; gap: 12px; }
 .icon-button { width: 44px; height: 44px; border-radius: 50%; }
 .status-dot { width: 8px; height: 8px; }
-.content, .settings-content { max-width: 1600px; padding: 24px 48px 24px; animation: page-enter 320ms ease-out; }
+.content, .settings-content { max-width: 1600px; padding: 24px 48px 24px; animation: page-enter var(--dur-enter) var(--ease-out); }
+/* The nav is an ordered row, so the enter direction is the direction the user moved:
+   content arriving from an earlier tab drifts in from the left, the reverse from the
+   right. Only the offset changes — the animation keeps its single name, because
+   scripts/glass-check.cjs pins the computed animationName of .content as the
+   page-transition contract. With no side class the offset defaults to 0, which is the
+   original vertical page-enter and is what the initial paint uses. */
+.content.enter-left { --enter-x: -16px; }
+.content.enter-right { --enter-x: 16px; }
 .breadcrumb { margin-bottom: 22px; font-size: 13px; }
 .page-title { min-height: 0; margin-bottom: 24px; align-items: center; }
 h1 { font-size: 26px; font-weight: 650; letter-spacing: -.4px; line-height: 1.35; }
 .page-title p { font-size: 14px; margin-top: 6px; line-height: 1.6; }
 p { font-size: 16px; }
 .panel, .metric { border-radius: 26px; corner-shape: squircle; background: linear-gradient(140deg, var(--panel), color-mix(in srgb, var(--panel) 92%, var(--accent-soft))); border: 1px solid var(--glass-edge); box-shadow: 0 8px 28px var(--shadow); padding: 24px; }
-.panel { transition: border-color 200ms, box-shadow 200ms; }
+.panel { transition: border-color var(--dur-quick) var(--ease-out), box-shadow var(--dur-quick) var(--ease-out); }
 .panel:hover { border-color: var(--accent-border); }
 .panel-head h2 { display: flex; align-items: center; gap: 12px; }
 .panel-icon { display: grid; place-items: center; flex-shrink: 0; width: 38px; height: 38px; border-radius: 13px; color: var(--accent); background: var(--accent-soft); }
-.metric { min-height: 158px; transition: transform 220ms, box-shadow 220ms, border-color 220ms; }
+.metric { min-height: 158px; transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out); }
 .metric:before { display: none; }
 .metric-label { justify-content: flex-start; gap: 12px; }
 .metric-label svg { order: -1; box-sizing: content-box; padding: 10px; border-radius: 14px; background: color-mix(in srgb, var(--card-color) 10%, transparent); }
@@ -66,25 +78,29 @@ button:active:not(:disabled) { transform: scale(.97); }
 .speed, .row b, .mini-stats b { font-family: inherit; font-variant-numeric: tabular-nums; }
 .mini-stats { border-top: 1px solid var(--border); padding-top: 16px; }
 .path-row code { padding: 7px 12px; border: 1px solid var(--border); background: var(--glass); border-radius: 12px; }
-.setting-row input[type="checkbox"] { appearance: none; position: relative; width: 50px; height: 30px; min-height: 30px; flex-shrink: 0; padding: 0; border-radius: 999px; background: var(--border); transition: background 180ms; }
-.setting-row input[type="checkbox"]:before { content: ""; position: absolute; width: 24px; height: 24px; left: 2px; top: 2px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px #10223725; transition: transform 220ms cubic-bezier(.2,.8,.2,1); }
+.setting-row input[type="checkbox"] { appearance: none; position: relative; width: 50px; height: 30px; min-height: 30px; flex-shrink: 0; padding: 0; border-radius: 999px; background: var(--border); transition: background var(--dur-quick) var(--ease-out); }
+.setting-row input[type="checkbox"]:before { content: ""; position: absolute; width: 24px; height: 24px; left: 2px; top: 2px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px #10223725; transition: transform var(--dur-base) var(--ease-knob); }
 .setting-row input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
 .setting-row input[type="checkbox"]:checked:before { transform: translateX(20px); }
-.widget-switch { display: inline-flex; align-items: center; gap: 8px; padding: 4px 5px 4px 12px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: inset 0 1px 1px var(--glass-edge), 0 4px 16px var(--shadow); cursor: pointer; user-select: none; transition: box-shadow 200ms, border-color 200ms; }
+.widget-switch { display: inline-flex; align-items: center; gap: 8px; padding: 4px 5px 4px 12px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: inset 0 1px 1px var(--glass-edge), 0 4px 16px var(--shadow); cursor: pointer; user-select: none; transition: box-shadow var(--dur-quick) var(--ease-out), border-color var(--dur-quick) var(--ease-out); }
 .widget-switch:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--glass-edge)); }
 .widget-switch-label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted); white-space: nowrap; }
-.widget-switch input[type="checkbox"] { appearance: none; position: relative; width: 38px; height: 22px; min-height: 22px; flex-shrink: 0; padding: 0; margin: 0; border-radius: 999px; background: var(--border); transition: background 200ms; cursor: pointer; }
-.widget-switch input[type="checkbox"]:before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px #10223725; transition: transform 260ms cubic-bezier(.34,1.45,.44,1); }
+.widget-switch input[type="checkbox"] { appearance: none; position: relative; width: 38px; height: 22px; min-height: 22px; flex-shrink: 0; padding: 0; margin: 0; border-radius: 999px; background: var(--border); transition: background var(--dur-quick) var(--ease-out); cursor: pointer; }
+.widget-switch input[type="checkbox"]:before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px #10223725; transition: transform var(--dur-base) var(--ease-back); }
 .widget-switch input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
 .widget-switch input[type="checkbox"]:checked:before { transform: translateX(16px); }
 /* Promote only while the enter/morph animations actually run. */
 .app-to-widget, .app-enter { will-change: opacity, transform; }
-.app-to-widget { opacity: 0; transform: translateY(10px) scale(.985); pointer-events: none; transition: opacity 180ms cubic-bezier(.4,0,1,1), transform 180ms cubic-bezier(.4,0,1,1); }
-.app-enter { animation: app-enter 340ms cubic-bezier(.22,1,.36,1); }
+.app-to-widget { opacity: 0; transform: translateY(10px) scale(.985); pointer-events: none; transition: opacity var(--dur-quick) var(--ease-in-out), transform var(--dur-quick) var(--ease-in-out); }
+.app-enter { animation: app-enter var(--dur-enter) var(--ease-out); }
 @keyframes app-enter { from { opacity: 0; transform: translateY(10px) scale(.988); } to { opacity: 1; transform: none; } }
 .notice, .alert { border-radius: 15px; }
 .settings-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-@keyframes page-enter { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+@keyframes page-enter { from { opacity: 0; transform: translate(var(--enter-x, 0), 7px); } to { opacity: 1; transform: none; } }
+/* A metric that actually moved between snapshots: one 640ms arc back to its own colour,
+   replayed only by remounting the value span. Never on first paint, never looping. */
+@keyframes value-changed { 0% { color: var(--accent); text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 55%, transparent); } 100% { color: inherit; text-shadow: none; } }
+.value-changed { animation: value-changed var(--dur-fill) var(--ease-out) 1; }
 @media (max-width: 1200px) { .topbar { padding: 0 22px; gap: 10px; } .glass-nav button { padding: 9px 13px; } .brand { font-size: 16px; } .status-pill { font-size: 12px; } .content { padding: 24px; } .settings-layout { grid-template-columns: 1fr; } }
 @media (max-width: 950px) { .topbar { height: auto; min-height: 126px; grid-template-columns: 1fr auto; padding: 12px 24px; gap: 10px; } .glass-nav { grid-row: 2; grid-column: 1 / -1; justify-self: center; } .header-actions { grid-column: 2; grid-row: 1; } }
 @media (max-width: 600px) { .topbar { padding: 10px 14px; } .brand img { width: 36px; height: 36px; } .brand { font-size: 15px; } .header-actions { gap: 2px; } .widget-switch { padding: 4px 4px 4px 8px; gap: 6px; } .widget-switch-label { display: none; } .status-pill { font-size: 11px; } .glass-nav { width: 100%; } .glass-nav button { padding: 8px 3px; gap: 5px; font-size: 12px; } .glass-nav button svg { width: 16px; } .content { padding: 20px 16px; } .page-title { flex-wrap: wrap; gap: 16px; } .metrics { grid-template-columns: 1fr; } .panel, .metric { padding: 18px; border-radius: 22px; } .panel-head { flex-wrap: wrap; } .segmented { max-width: 100%; } .segmented button { padding: 6px 10px; font-size: 12px; } .filters > .segmented { width: 100%; justify-content: space-between; } .filters select { flex: 1; max-width: 100%; } .date-inputs { flex-wrap: wrap; } .date-inputs input { width: 44%; } .setting-row { gap: 12px; flex-wrap: wrap; } .price-form { grid-template-columns: 1fr; } .performance { grid-template-columns: 1fr 1fr; } footer { flex-wrap: wrap; } .legend { flex-wrap: wrap; gap: 8px; } }
@@ -97,11 +113,11 @@ button:active:not(:disabled) { transform: scale(.97); }
 .range-selector { position: relative; isolation: isolate; display: inline-grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; }
 .range-selector button { position: relative; justify-content: center; z-index: 1; }
 .range-selector button.active { background: transparent; box-shadow: none; }
-.range-lens { position: absolute; inset: 4px auto 4px 4px; width: calc((100% - 8px) / 5); border-radius: 999px; background: linear-gradient(150deg, var(--panel), var(--accent-soft)); border: 2px solid var(--glass-edge); box-shadow: inset 0 1px 5px var(--glass-edge), 0 3px 10px var(--shadow); transform: translateX(calc(var(--active-index) * 100%)); transition: transform 420ms cubic-bezier(.22, 1, .36, 1); pointer-events: none; }
+.range-lens { position: absolute; inset: 4px auto 4px 4px; width: calc((100% - 8px) / 5); border-radius: 999px; background: linear-gradient(150deg, var(--panel), var(--accent-soft)); border: 2px solid var(--glass-edge); box-shadow: inset 0 1px 5px var(--glass-edge), 0 3px 10px var(--shadow); transform: translateX(calc(var(--active-index) * 100%)); transition: transform var(--dur-slow) var(--ease-out); pointer-events: none; }
 /* Reveal only the data layer; axes and reset gaps retain their true positions. */
-.chart-reveal { animation: chart-reveal 780ms cubic-bezier(.2, .65, .3, 1) both; }
+.chart-reveal { animation: chart-reveal var(--dur-reveal) var(--ease-out) both; }
 @keyframes chart-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 -1% 0 -1%); } }
-.quota-window .track i { transform-origin: left center; animation: quota-fill 600ms cubic-bezier(.22, 1, .36, 1) both; }
+.quota-window .track i { transform-origin: left center; animation: quota-fill var(--dur-fill) var(--ease-out) both; }
 @keyframes quota-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
 
@@ -113,7 +129,7 @@ button:active:not(:disabled) { transform: scale(.97); }
 .quota-window-selector button.active { background: transparent; box-shadow: none; }
 @media (max-width: 600px) { .filters > .account-control { flex: 1 1 100%; margin-left: 0; } .quota-window-selector button { white-space: normal; } }
 
-.chart-scene { animation: chart-scene-enter 360ms ease-out both; }
+.chart-scene { animation: chart-scene-enter var(--dur-enter) var(--ease-out) both; }
 @keyframes chart-scene-enter { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 600px) { .chart-minor-tick { display: none; } }
 

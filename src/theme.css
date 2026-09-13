@@ -1,5 +1,23 @@
 :root {
   color-scheme: light;
+  /* Motion. These replaced the literal durations and five different curves that were
+     scattered through style.css and glass.css, so the app's pace is now one edit. The
+     desktop widget keeps its own literals in widget.css. Reach for the nearest token
+     rather than a new literal duration. */
+  --dur-quick: 180ms;   /* hover, press, focus, borders */
+  --dur-base: 240ms;    /* control and panel state changes */
+  --dur-enter: 320ms;   /* page enter, app enter */
+  --dur-slow: 420ms;    /* lens slides */
+  --dur-fill: 640ms;    /* bar and meter fills, value emphasis */
+  --dur-reveal: 780ms;  /* chart clip-path reveal */
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-in-out: cubic-bezier(.4, 0, .2, 1);
+  --ease-knob: cubic-bezier(.2, .8, .2, 1);
+  --ease-back: cubic-bezier(.34, 1.45, .44, 1);
+  /* Every chart renders at this height, whatever its panel is wide. 160px keeps the plot
+     area near what the narrow 趋势 panel always had (108px of plot), and pulls the
+     full-width 额度 chart down from 255px, where one 今日 sample left a vast empty field. */
+  --chart-height: 160px;
   --bg: #f6f8f7;
   --sidebar: #f0f3f1;
   --panel: #fff;

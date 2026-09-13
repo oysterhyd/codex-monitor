@@ -78,13 +78,20 @@ const prefersReducedMotion = () =>
   typeof matchMedia === "function" &&
   matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function Animated({ value, format = compact }) {
+function Animated({ value, format = compact, emphasize = false }) {
   const [shown, setShown] = useState(value),
-    prev = useRef(value);
+    prev = useRef(value),
+    [pulse, setPulse] = useState(0);
   useEffect(() => {
+    const previous = prev.current;
+    // "What changed since the last snapshot" has to be a real move in the value: not the
+    // first paint (previous == null), not the 450ms tween re-rendering, and not a
+    // machine that asked for less motion. Remounting the value span by key is what
+    // replays the one-shot animation; nothing loops.
+    if (emphasize && previous != null && value != null && value !== previous && !document.hidden && !prefersReducedMotion()) setPulse((p) => p + 1);
     if (
       value == null ||
-      prev.current == null ||
+      previous == null ||
       document.hidden ||
       prefersReducedMotion()
     ) {
@@ -93,7 +100,7 @@ function Animated({ value, format = compact }) {
       return;
     }
     const start = performance.now(),
-      from = prev.current;
+      from = previous;
     let frame;
     const tick = (now) => {
       const t = Math.min(1, (now - start) / 450);
@@ -103,8 +110,9 @@ function Animated({ value, format = compact }) {
     frame = requestAnimationFrame(tick);
     prev.current = value;
     return () => cancelAnimationFrame(frame);
-  }, [value]);
-  return <>{format(shown)}</>;
+  }, [value, emphasize]);
+  if (!emphasize) return <>{format(shown)}</>;
+  return <span key={pulse} className={pulse ? "value-changed" : undefined}>{format(shown)}</span>;
 }
 function Empty({ children }) {
   return (
@@ -132,6 +140,21 @@ const nearestSample = (event, xy) => {
   }
   return best;
 };
+// Two fills the chart must not paint. A sub-path with no width (a sample that starts its own
+// segment, because a reset or a gap was reported between it and the previous one) has no area
+// at all, yet painting it draws a bare vertical line down to the baseline. And when the whole
+// series covers a sliver of the axis, every fill under it is a spike rather than an area --
+// the 今日 账户额度 chart holding one observation. The line, the sample markers and the reset
+// dashes carry those series on their own.
+const AREA_MIN_SPREAD = 84; // a tenth of the 836-unit plot
+const areaPath = (area, xy) => {
+  const xs = xy.map((p) => p[0]);
+  if (Math.max(...xs) - Math.min(...xs) < AREA_MIN_SPREAD) return "";
+  return area.replace(/M[^M]*/g, (segment) => {
+    const px = [...segment.matchAll(/[ML]([\d.]+)/g)].map((m) => Number(m[1]));
+    return Math.max(...px) - Math.min(...px) > 0.5 ? segment : "";
+  });
+};
 const Chart = React.memo(function Chart({
   points,
   value = "total",
@@ -158,12 +181,14 @@ const Chart = React.memo(function Chart({
           836,
       150 - ((p[value] || 0) / max) * 128,
     ]);
+    const paths = chartPaths(points, xy, { step, smooth: step });
     return {
       max,
       first,
       last,
       xy,
-      ...chartPaths(points, xy, { step, smooth: step }),
+      ...paths,
+      area: areaPath(paths.area, xy),
     };
   }, [points, value, percent, step, range]);
   if (!geometry) return <Empty />;
@@ -174,32 +199,43 @@ const Chart = React.memo(function Chart({
   const tickKey = last - first > 2 * 86400000 ? "tickDay" : "tickTime";
   const tickFormat = dateFormat(tickKey, TICK_FORMATS[tickKey]);
   const fractions = last > first ? [0, 1/6, 2/6, 3/6, 4/6, 5/6, 1] : [0];
+  // 今日 quota history is often a single sample; a 2.5px dot on a 160px plot reads as a
+  // stray mark, so a series too short to draw a slope gets a marker that is really visible.
+  const dotRadius = points.length < 4 ? 4.5 : 2.5;
   return (
     <div className="chart-wrap">
+      <div className="chart-plot">
+        {/* The y axis is HTML so its type size is fixed: the svg below is stretched to
+            the panel width (preserveAspectRatio="none") to hold the chart height fixed. */}
+        <div className="chart-axis-y" aria-hidden="true">
+          {[0, 0.5, 1].map((v) => (
+            <span key={v} style={{ top: `${((150 - v * 128) / 190) * 100}%` }}>
+              {percent ? max * v + "%" : compact(max * v)}
+            </span>
+          ))}
+        </div>
       <svg
         key={replayKey}
         className="chart-scene"
         viewBox="0 0 920 190"
+        preserveAspectRatio="none"
         role="img"
         aria-label={label || tr("用量趋势")}
         onMouseLeave={() => setHover(null)}
       >
         {[0, 0.5, 1].map((v) => (
-          <g key={v}>
-            <line
-              x1="44"
-              x2="880"
-              y1={150 - v * 128}
-              y2={150 - v * 128}
-              stroke="var(--border)"
-              strokeDasharray="4 5"
-            />
-            <text x="0" y={154 - v * 128} fill="var(--muted)" fontSize="16">
-              {percent ? max * v + "%" : compact(max * v)}
-            </text>
-          </g>
+          <line
+            key={v}
+            x1="44"
+            x2="880"
+            y1={150 - v * 128}
+            y2={150 - v * 128}
+            stroke="var(--border)"
+            strokeDasharray="4 5"
+            vectorEffect="non-scaling-stroke"
+          />
         ))}
-        {fractions.map((f,i) => <line key={f} className={i % 2 ? "chart-minor-tick" : ""} x1={44+f*836} x2={44+f*836} y1="22" y2="150" stroke="var(--border)" opacity=".35" />)}
+        {fractions.map((f,i) => <line key={f} className={i % 2 ? "chart-minor-tick" : ""} x1={44+f*836} x2={44+f*836} y1="22" y2="150" stroke="var(--border)" opacity=".35" vectorEffect="non-scaling-stroke" />)}
         <g key={replayKey} className="chart-reveal">
         <path
           d={area}
@@ -212,6 +248,7 @@ const Chart = React.memo(function Chart({
           stroke={color}
           strokeWidth="2.5"
           strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
         />
         {/* One dashed layer for every reset/gap segment: the same strokes as one path
             element instead of one element per connector on 30d/all ranges. */}
@@ -223,16 +260,25 @@ const Chart = React.memo(function Chart({
             strokeWidth="1.2"
             strokeDasharray="3 5"
             opacity=".45"
+            vectorEffect="non-scaling-stroke"
           >
             <title>{tr("额度重置或窗口调整")}</title>
           </path>
         )}
+        {/* Sample markers are round-cap zero-length strokes, not <circle>s: the svg is
+            stretched to the panel width (preserveAspectRatio="none"), so a circle's rx
+            and ry scale by different factors and a wide chart renders it as a flat
+            ellipse. A non-scaling stroke is measured in screen pixels, so the marker is
+            a true circle at every panel width and the diameter is the same everywhere. */}
         {points.length < 15
           ? xy.map(([x, y], i) => (
-              <circle key={i} cx={x} cy={y} r={hoverIndex === i ? 5 : 2.5} fill={color} />
+              <path key={i} d={`M${x},${y} l0.01,0`} stroke={color} fill="none"
+                strokeWidth={hoverIndex === i ? 10 : dotRadius * 2}
+                strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             ))
           : hoverIndex != null && (
-              <circle cx={xy[hoverIndex][0]} cy={xy[hoverIndex][1]} r="5" fill={color} />
+              <path d={`M${xy[hoverIndex][0]},${xy[hoverIndex][1]} l0.01,0`} stroke={color} fill="none"
+                strokeWidth="10" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             )}
         </g>
         {/* Hover surface: outside the reveal group so it stays live during the wipe. */}
@@ -248,22 +294,15 @@ const Chart = React.memo(function Chart({
             if (index != null) setHover(index);
           }}
         />
-        {fractions.map((fraction, index) => (
-            <text
-              className={`chart-tick ${index % 2 ? "chart-minor-tick" : ""}`}
-              key={fraction}
-              x={44 + fraction * 836}
-              y="179"
-              textAnchor={
-                fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"
-              }
-              fill="var(--muted)"
-              fontSize="16"
-            >
-              {tickFormat.format(new Date(first + fraction * (last - first)))}
-            </text>
-          ))}
       </svg>
+      </div>
+      <div className="chart-axis-x" aria-hidden="true">
+        {fractions.map((fraction, index) => (
+          <span key={fraction} className={`chart-tick ${index % 2 ? "chart-minor-tick" : ""}`}>
+            {tickFormat.format(new Date(first + fraction * (last - first)))}
+          </span>
+        ))}
+      </div>
       <div className="chart-caption">
         {chosen
           ? `${chosen.name} · ${percent ? chosen[value].toFixed(1) + "%" : full(chosen[value]) + " tokens"}`
@@ -295,7 +334,7 @@ const Metric = React.memo(function Metric({ label, value, format, foot, icon: Ic
         <Icon size={19} />
       </div>
       <div className="metric-value">
-        <Animated value={value} format={format} />
+        <Animated value={value} format={format} emphasize />
       </div>
       <div className="metric-foot">
         {foot}
@@ -563,7 +602,9 @@ function App() {
     [recordPage,setRecordPage] = useState(1),
     [expanded,setExpanded] = useState(null);
   const requestFilter = useRef(null);
-  requestFilter.current = {...filter,page,recordPage,pageSize:50};
+  // `view` is part of the snapshot request: the history breakdown maps are built per view
+  // (only filter.view is populated), so a missing view makes 按项目 / 按任务 render empty.
+  requestFilter.current = {...filter,page,recordPage,pageSize:50,view};
   const refresh = useRef(null);
   if(!refresh.current) refresh.current=createRefresh(
     async value=>({...await api.snapshot(value), chartRange: value.range, chartTransitionKey: JSON.stringify(value)}),
@@ -576,7 +617,7 @@ function App() {
   },[JSON.stringify(filter)]);
   useEffect(() => {
     load();
-  }, [JSON.stringify(filter),page,recordPage]);
+  }, [JSON.stringify(filter),page,recordPage,view]);
   useEffect(() => {
     const timer=setInterval(()=>{if(!document.hidden)load();},30000);
     const wake=()=>{if(!document.hidden)load();};
@@ -653,7 +694,11 @@ function App() {
     try {
       if (on && appEl) {
         appEl.classList.add('app-to-widget');
-        await new Promise(resolve => setTimeout(resolve, 180));
+        // Wait out the .app-to-widget transition before the native window hides. The
+        // duration is read from the CSS token rather than repeated as a literal, so
+        // retuning the motion scale cannot silently desync this wait from the animation.
+        const morph = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-quick')) || 180;
+        await new Promise(resolve => setTimeout(resolve, morph));
       }
       await api.widgetMode(on);
     } catch (e) { appEl?.classList.remove('app-to-widget'); setError(e.message); }
@@ -665,6 +710,14 @@ function App() {
     ["quota", ChartLine, tr("账户额度")],
     ["settings", GearSix, tr("设置与价格")],
   ];
+  // Which way the user moved in the nav decides which edge the next page enters from.
+  // Resolved once per page and kept in a ref: the class must not change on a later
+  // re-render of the same page, because swapping animation-name would replay the enter.
+  const entered = useRef({ page: "overview", side: "" });
+  if (entered.current.page !== page) {
+    const from = nav.findIndex(([id]) => id === entered.current.page);
+    entered.current = { page, side: nav.findIndex(([id]) => id === page) > from ? " enter-left" : " enter-right" };
+  }
   const s = data?.sums,
     p = data?.performance,
     quotas = data?.quotas || [],
@@ -734,7 +787,7 @@ function App() {
           </div>
         </header>
       <main>
-        <div key={page} className={`content${page === "settings" ? " settings-content" : ""}`}>
+        <div key={page} className={`content${page === "settings" ? " settings-content" : ""}${entered.current.side}`}>
           <div className="page-title">
             <div>
               <h1 ref={heading} tabIndex={-1}>
@@ -942,6 +995,11 @@ function App() {
                       onClick={showModels}
                     />
                   </div>
+                  {/* Trend and speed are overview panels. On the history page they pushed
+                      消耗明细 and 任务运行记录 below a 960px viewport, so the history page
+                      now opens on its own content; the four metric cards stay on both as a
+                      persistent summary strip. */}
+                  {page === "overview" && (
                   <div className="two-col">
                     <Panel
                       title={tr("Token 使用趋势")}
@@ -988,9 +1046,10 @@ function App() {
                       </div>
                     </Panel>
                   </div>
+                  )}
                   {page === "overview" ? (
                     <div className="two-col equal">
-                      <Panel title={tr("模型分布")}>
+                      <Panel title={tr("模型分布")} className="panel-fill">
                         <Rank
                           rows={data.models}
                           type="model"
@@ -1022,9 +1081,9 @@ function App() {
                       </Panel>
                     </div>
                   ) : (
-                    <Panel title={tr("消耗明细")} meta={tr("共 {0} 条", data[view].length)}>
+                    <Panel title={tr("消耗明细")} meta={tr("共 {0} 条", (data[view] || []).length)}>
                       <Breakdown
-                        rows={data[view]}
+                        rows={data[view] || []}
                         view={view}
                         setView={setView}
                         choose={choose}

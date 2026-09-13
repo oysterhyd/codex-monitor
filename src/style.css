@@ -39,9 +39,9 @@ select:focus-visible {
 }
 button {
   transition:
-    background 0.18s,
-    transform 0.18s,
-    border-color 0.18s;
+    background var(--dur-quick) var(--ease-out),
+    transform var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out);
 }
 ::selection {
   background: var(--accent);
@@ -422,6 +422,26 @@ select {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(270px, 1fr);
   gap: 20px;
+  /* Panels in a row stay the same height: a ragged bottom edge reads as misalignment
+     across the whole page. A one-row panel is therefore allowed to carry trailing space
+     rather than being sized to its content (that was tried — see below) so the row's
+     outline stays square. */
+}
+
+/* Content-sized panels were tried here and reverted: 模型分布 (one row) no longer
+   stretched to 账户额度's height, which did remove the dead field inside it but left a
+   visibly uneven pair. The row's outer edge is the stronger signal. */
+
+/* A shared row height means a rank list holding one or two rows leaves the rest of its
+   panel empty. Let the list grow into that slack and centre inside it, so the panel reads
+   as balanced rather than top-heavy. */
+.panel-fill {
+  display: flex;
+  flex-direction: column;
+}
+.panel-fill > .rank {
+  flex: 1;
+  justify-content: center;
 }
 .two-col.equal {
   grid-template-columns: 1fr 1fr;
@@ -455,11 +475,40 @@ select {
 .chart-wrap {
   margin-top: 17px;
 }
-.chart-wrap svg {
-  width: 100%;
-  height: auto;
+.chart-plot {
+  position: relative;
+}
+/* One chart height everywhere. The svg keeps its 920x190 coordinate system and stretches
+   to the panel width (preserveAspectRatio="none"), so a chart no longer grows taller as
+   its panel gets wider -- the full-width 额度 chart used to render 255px tall against the
+   趋势 chart's 168px, with 22px axis type against 14px. Axis labels are HTML at a fixed
+   12px so the type cannot scale with the panel either. */
+.chart-plot svg {
   display: block;
+  width: 100%;
+  height: var(--chart-height);
   overflow: visible;
+}
+.chart-axis-y {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.chart-axis-y span {
+  position: absolute;
+  left: 0;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.chart-axis-x {
+  display: flex;
+  justify-content: space-between;
+  /* The plot spans x=44..880 of the 920-unit viewBox. */
+  margin: 5px 4.35% 0 4.78%;
+  color: var(--muted);
+  font-size: 12px;
 }
 .chart-caption {
   height: 18px;
@@ -564,7 +613,7 @@ select {
   height: 100%;
   background: var(--accent);
   border-radius: 5px;
-  transition: width 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition: width var(--dur-fill) var(--ease-out);
   opacity: 0.8;
 }
 .rank-meta {
@@ -772,6 +821,8 @@ tbody tr:hover {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
+  /* Same reasoning as .two-col: 外观与后台 and 数据来源 are read as a pair, so they share
+     a height instead of each ending wherever its own content does. */
 }
 .settings-layout > .panel {
   min-width: 0;

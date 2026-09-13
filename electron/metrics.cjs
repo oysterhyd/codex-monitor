@@ -96,11 +96,32 @@ function summarize(store, filter = {}) {
   const analytics = ['all', 'overview', 'history'].includes(page);
   const recordsWanted = ['all', 'history'].includes(page);
   const historyWanted = ['all', 'quota'].includes(page);
-  // options.models / options.projects are only rendered by the overview and
-  // history pages; options.sessions additionally by the settings page. The quota
-  // page reads none of them, yet DISTINCT model is a full scan of usage.
+  // options.models is read by the model filter and the price form's datalist
+  // (settings, src/main.jsx:1405); options.projects only by the project filter, which
+  // the .filters block renders for overview and history (src/main.jsx:828, :915). The
+  // quota page reads none of them, yet DISTINCT model is a full scan of usage.
   const optionsWanted = ['all', 'overview', 'history', 'settings'].includes(page);
-  const breakdownWanted = ['all', 'overview', 'history'].includes(page);
+  // options.sessions is read by no page: the string "sessions" does not occur anywhere
+  // in src/main.jsx. (The comment that used to stand here claimed the settings page read
+  // it; it does not.) On the 8,855-usage-row corpus it is 291 entries / 29.6K of every
+  // snapshot, so it is built only for the two callers that have always been handed a
+  // complete snapshot — "all", which tests and scripts request with no page argument, and
+  // settings, which tests/optimization.test.cjs:127-131 pins — and is empty elsewhere.
+  const sessionsWanted = ['all', 'settings'].includes(page);
+  // prices is read only by the settings page's price table (src/main.jsx:1452). It grows
+  // with every manual price version the user saves, so it is shipped only where it is read.
+  const pricesWanted = ['all', 'settings'].includes(page);
+  // The breakdown maps are rendered one at a time: overview renders data.models only
+  // (:1050), and history renders data[view] (:1080-1082), where view is renderer state
+  // defaulting to "models". "all" builds every map, for the same reason it keeps
+  // options.sessions. Measured on the same corpus: the projects and tasks maps history
+  // does not render are 68.5K of its 244.7K snapshot at range "all".
+  const views = ['models', 'projects', 'tasks'];
+  const breakdownViews =
+    page === 'all' ? views
+    : page === 'overview' ? ['models']
+    : page === 'history' ? [views.includes(filter.view) ? filter.view : 'models']
+    : [];
   const pageSize = Math.max(1, Math.min(200, Math.floor(Number(filter.pageSize) || 200)));
   const requestedPage = Math.max(1, Math.floor(Number(filter.recordPage) || 1));
   const prices = store.prices();
@@ -154,14 +175,23 @@ function summarize(store, filter = {}) {
     projects = {},
     tasks = {},
     timeline = {};
+  const maps = { models, projects, tasks };
+  const keyByView = {
+    models: (r) => r.model,
+    projects: (r) => sessionMap.get(r.session)?.project || "未归属项目",
+    tasks: (r) => r.session,
+  };
   const hourly = filter.range === "today" || !filter.range;
-  // The breakdown maps (and the per-row local-date bucketing) are only rendered by
-  // the overview and history pages, so they are skipped for settings/quota pages.
-  const accumulators = [];
-  if (breakdownWanted) {
-    accumulators.push([models, r => r.model], [projects, r => sessionMap.get(r.session)?.project || "未归属项目"], [tasks, r => r.session]);
-  }
-  accumulators.push([timeline, r => bucketOf(r.ts, hourly)]);
+  // Only the maps this page renders are accumulated. The ones left out stay empty
+  // objects, which rank() already turns into the [] the snapshot has always shipped
+  // for them, so the response shape is unchanged.
+  const accumulators = breakdownViews.map((name) => [maps[name], keyByView[name]]);
+  // timeline is a separate accumulator because the trend chart is not one of the
+  // segmented breakdowns. It is read only by the overview page (src/main.jsx:1016), so
+  // history no longer pays for the 64 buckets it stopped rendering. "all" keeps it
+  // because main.cjs:262 and the acceptance scripts request an unfiltered snapshot.
+  if (['all', 'overview'].includes(page))
+    accumulators.push([timeline, r => bucketOf(r.ts, hourly)]);
   for (const r of rows) {
     const c = costWith(r, prices, pricesByModel);
     Object.assign(r, c);
@@ -369,12 +399,12 @@ function summarize(store, filter = {}) {
       projects: optionsWanted
         ? [...new Set(availableSessions.map((s) => s.project))].sort()
         : [],
-      sessions: optionsWanted
+      sessions: sessionsWanted
         ? availableSessions.map((s) => ({ id: s.id, project: s.project }))
         : [],
     },
     settings: store.settings(),
-    prices,
+    prices: pricesWanted ? prices : [],
     recovery: store.get("recovery"),
   };
 }
