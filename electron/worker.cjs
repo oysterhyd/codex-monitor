@@ -121,6 +121,9 @@ parentPort.on("message", (msg) => {
         case "price":
           result = store.savePrice(msg.args);
           break;
+        case "deletePrice":
+          result = store.deletePrice(msg.args);
+          break;
         case "export":
           result = csv(exportRows(store, msg.args));
           break;

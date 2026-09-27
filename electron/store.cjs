@@ -222,18 +222,39 @@ class Store {
         throw new Error("价格须为有限的非负数");
     const effective = iso(p.effective);
     if (!effective) throw new Error("生效时间无效");
-    this.sql(
-        "INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)",
-      )
-      .run(
-        p.model,
-        effective,
-        p.input,
-        p.cached,
-        p.output,
-        p.cache_write,
-        "手动设置",
-      );
+    if (p.id !== undefined && p.id !== null) {
+      if (!Number.isSafeInteger(p.id) || p.id < 1)
+        throw new Error("价格版本无效");
+      const existing = this.sql("SELECT source,retired FROM prices WHERE id=?").get(p.id);
+      if (!existing || existing.source !== "手动设置" || existing.retired)
+        throw new Error("仅可修改有效的手动价格版本");
+      this.sql(
+        "UPDATE prices SET model=?,effective=?,input=?,cached=?,output=?,cache_write=? WHERE id=?",
+      ).run(p.model, effective, p.input, p.cached, p.output, p.cache_write, p.id);
+    } else {
+      this.sql(
+          "INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)",
+        )
+        .run(
+          p.model,
+          effective,
+          p.input,
+          p.cached,
+          p.output,
+          p.cache_write,
+          "手动设置",
+        );
+    }
+    return this.prices();
+  }
+  deletePrice(id) {
+    if (!Number.isSafeInteger(id) || id < 1)
+      throw new Error("价格版本无效");
+    const existing = this.sql("SELECT source,retired FROM prices WHERE id=?").get(id);
+    if (!existing) throw new Error("价格版本不存在");
+    if (existing.source !== "手动设置" || existing.retired)
+      throw new Error("仅可删除手动价格版本");
+    this.sql("DELETE FROM prices WHERE id=?").run(id);
     return this.prices();
   }
   prices() {

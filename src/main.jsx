@@ -1263,6 +1263,7 @@ function Settings({ data, act, busy }) {
     cache_write: "0",
     effective: "1970-01-01T00:00",
   });
+  const [editingPriceId, setEditingPriceId] = useState(null);
   const set = (k, v) => setPrice((p) => ({ ...p, [k]: v }));
   return (
     <div className="settings-layout">
@@ -1383,17 +1384,23 @@ function Settings({ data, act, busy }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            const id = editingPriceId;
             act(
-              () =>
-                api.price({
+              async () => {
+                const result = await api.price({
+                  ...(id === null ? {} : { id }),
                   ...price,
                   input: Number(price.input),
                   cached: Number(price.cached),
                   output: Number(price.output),
                   cache_write: Number(price.cache_write),
                   effective: new Date(price.effective).toISOString(),
-                }),
-              tr("价格版本已保存"),
+                });
+                setEditingPriceId(null);
+                setPrice({ model: "", input: "", cached: "", output: "", cache_write: "0", effective: "1970-01-01T00:00" });
+                return result;
+              },
+              tr(id === null ? "价格版本已保存" : "价格版本已更新"),
             );
           }}
         >
@@ -1402,8 +1409,8 @@ function Settings({ data, act, busy }) {
                 list="model-options"
                 required
                 placeholder={tr("例如 gpt-5.5")}
-                value={price.model}
-                onChange={(e) => set("model", e.target.value)}
+              value={price.model}
+              onChange={(e) => set("model", e.target.value)}
               />
               <datalist id="model-options">
                 {data.options.models.map((m) => (
@@ -1438,7 +1445,12 @@ function Settings({ data, act, busy }) {
               />
             </label>
           </div>
-          <button className="button primary" type="submit" disabled={busy}>{tr("保存价格版本")}</button>
+          <div className="price-form-actions">
+            <button className="button primary" type="submit" disabled={busy}>
+              {editingPriceId === null ? tr("保存价格版本") : tr("保存修改")}
+            </button>
+            {editingPriceId !== null && <button className="button" type="button" disabled={busy} onClick={() => { setEditingPriceId(null); setPrice({ model: "", input: "", cached: "", output: "", cache_write: "0", effective: "1970-01-01T00:00" }); }}>{tr("取消编辑")}</button>}
+          </div>
         </form>
         <div className="table-scroll">
           <table>
@@ -1450,6 +1462,7 @@ function Settings({ data, act, busy }) {
                 <th>{tr("输出")}</th>
                 <th>{tr("写入")}</th>
                 <th>{tr("生效时间")}</th>
+                <th>{tr("操作")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1460,7 +1473,8 @@ function Settings({ data, act, busy }) {
                     <td>
                       <button
                         className="table-link"
-                        onClick={() =>
+                        onClick={() => {
+                          setEditingPriceId(null);
                           setPrice({
                             model: p.model,
                             input: p.input,
@@ -1469,8 +1483,8 @@ function Settings({ data, act, busy }) {
                             cache_write: p.cache_write,
                             effective:
                               new Date().toLocaleDateString("en-CA") + "T00:00",
-                          })
-                        }
+                          });
+                        }}
                       >
                         {p.model}{" "}
                         <small>
@@ -1486,6 +1500,33 @@ function Settings({ data, act, busy }) {
                       {p.effective.startsWith("1970")
                         ? tr("全部历史基准")
                         : date(p.effective)}
+                    </td>
+                    <td>
+                      {p.source === "手动设置" ? (
+                        <div className="price-actions">
+                          <button className="button" type="button" disabled={busy} onClick={() => {
+                            setEditingPriceId(p.id);
+                            const effective = new Date(p.effective);
+                            effective.setMinutes(effective.getMinutes() - effective.getTimezoneOffset());
+                            setPrice({
+                              model: p.model,
+                              input: p.input,
+                              cached: p.cached,
+                              output: p.output,
+                              cache_write: p.cache_write,
+                              effective: effective.toISOString().slice(0, 16),
+                            });
+                          }}>{tr("编辑")}</button>
+                          <button className="button danger" type="button" disabled={busy} onClick={() => act(async () => {
+                            const result = await api.deletePrice({ id: p.id, model: p.model });
+                            if (result && editingPriceId === p.id) {
+                              setEditingPriceId(null);
+                              setPrice({ model: "", input: "", cached: "", output: "", cache_write: "0", effective: "1970-01-01T00:00" });
+                            }
+                            return result;
+                          }, tr("价格版本已删除"))}>{tr("删除")}</button>
+                        </div>
+                      ) : "—"}
                     </td>
                   </tr>
                 ))}

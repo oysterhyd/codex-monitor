@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("monitor", {
   assignAccount: value => ipcRenderer.invoke("assignAccount", value),
   settings: (value) => ipcRenderer.invoke("settings", value),
   price: (value) => ipcRenderer.invoke("price", value),
+  deletePrice: (value) => ipcRenderer.invoke("deletePrice", value),
   refresh: () => ipcRenderer.invoke("refresh"),
   export: (filter) => ipcRenderer.invoke("export", filter),
   clear: () => ipcRenderer.invoke("clear"),

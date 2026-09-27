@@ -29,13 +29,12 @@ function openStore(file) {
   try {
     recovered.kv = source.prepare('SELECT * FROM kv').all();
     recovered.prices = source.prepare('SELECT * FROM prices').all();
-    if (source.prepare("SELECT 1 FROM sqlite_master WHERE name='accounts'").get()) recovered.accounts = source.prepare('SELECT * FROM accounts').all();
     for (const row of recovered.kv) JSON.parse(row.value);
   } catch (error) {
     source.close();
     throw new Error('数据库已备份，但设置或价格无法完整读取，已停止自动恢复。');
   }
-  for (const table of ['account_observations','sessions','usage','turns','quotas','notices']) {
+  for (const table of ['accounts','account_observations','sessions','usage','turns','quotas','notices']) {
     if (!source.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) continue;
     try { recovered[table]=source.prepare(`SELECT * FROM ${table}`).all(); }
     catch {
@@ -63,10 +62,10 @@ function openStore(file) {
         if (table === 'usage' && (typeof row.id !== 'string' || typeof row.session !== 'string' || typeof row.model !== 'string' || !Number.isFinite(Date.parse(row.ts)) || ['input','cached','output','reasoning','cache_write'].some(k => row[k] !== null && (typeof row[k] !== 'number' || !Number.isFinite(row[k]) || row[k] < 0)))) { skipped[table]=(skipped[table]||0)+1;continue; }
         const keys=columns.filter(k=>Object.hasOwn(row,k));
         try { fresh.db.prepare(`INSERT ${table==='kv'||table==='prices'||table==='accounts'?'':'OR IGNORE'} INTO ${table}(${keys.join(',')}) VALUES(${keys.map(()=>'?').join(',')})`).run(...keys.map(k=>row[k])); }
-        catch { if(table==='kv'||table==='prices'||table==='accounts')throw new Error('设置或价格恢复失败');skipped[table]=(skipped[table]||0)+1; }
+        catch { if(table==='kv'||table==='prices')throw new Error('设置或价格恢复失败');skipped[table]=(skipped[table]||0)+1; }
       }
     }
-    fresh.set('recovery',{at:new Date().toISOString(),backup,skipped,message:'监测数据库已重建，本机记录会自动同步；部分损坏的历史额度采样可能缺失。设置与价格已保留，原库位于数据目录 recovery-backups。'});
+    fresh.set('recovery',{at:new Date().toISOString(),backup,skipped,message:'监测数据库已重建，本机记录会自动同步；部分损坏记录可能缺失。设置与价格已保留，原库位于数据目录 recovery-backups。'});
     fresh.set('replayRecovered',true);
     fresh.db.exec('COMMIT');
     const check=fresh.db.prepare('PRAGMA integrity_check').all();

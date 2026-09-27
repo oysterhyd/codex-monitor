@@ -21,7 +21,20 @@ async function findCodex(override) {
   }
   if (resolvedCodex && resolvedOverride === null) return resolvedCodex;
   resolvedOverride = null;
-  // Prefer the installed standalone binary: Store-package executables can reject external launches.
+  const runVersion = async (file) => {
+    try {
+      await promisify(execFile)(file, ["--version"], {
+        windowsHide: true,
+        timeout: 8000,
+        maxBuffer: 64 * 1024,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  let foundCandidate = false;
+  // A stale or incompatible standalone install must not prevent trying the Store app.
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     const file = path.join(
       dir,
@@ -36,11 +49,19 @@ async function findCodex(override) {
       "bin",
       "codex.exe",
     );
-    if (fs.existsSync(file)) return (resolvedCodex = file);
+    if (!fs.existsSync(file)) continue;
+    foundCandidate = true;
+    if (await runVersion(file)) return (resolvedCodex = file);
   }
   try {
     const { stdout } = await promisify(execFile)(
-      "pwsh",
+      path.join(
+        process.env.SystemRoot || "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      ),
       [
         "-NoProfile",
         "-NonInteractive",
@@ -51,25 +72,15 @@ async function findCodex(override) {
     );
     for (const dir of stdout.trim().split(/\r?\n/).reverse()) {
       const file = path.join(dir.trim(), "app", "resources", "codex.exe");
-      if (fs.existsSync(file)) return (resolvedCodex = file);
+      if (!fs.existsSync(file)) continue;
+      foundCandidate = true;
+      if (await runVersion(file)) return (resolvedCodex = file);
     }
   } catch {}
-  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
-    const file = path.join(
-      dir,
-      "node_modules",
-      "@openai",
-      "codex",
-      "node_modules",
-      "@openai",
-      "codex-win32-x64",
-      "vendor",
-      "x86_64-pc-windows-msvc",
-      "bin",
-      "codex.exe",
+  if (foundCandidate)
+    throw new Error(
+      "检测到 Codex，但无法启动 App Server；请在设置中选择有效的 codex.exe",
     );
-    if (fs.existsSync(file)) return (resolvedCodex = file);
-  }
   throw new Error(
     "未找到 Codex App Server，请在设置中选择桌面端随附的 codex.exe",
   );
@@ -90,23 +101,32 @@ function describeQuotaError(error) {
 async function readQuota({ codexHome, executable }) {
   const binary = await findCodex(executable);
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, ["app-server"], {
-      windowsHide: true,
-      env: { ...process.env, CODEX_HOME: codexHome },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    activeChildren.add(child);
+    let child;
     let buffer = "",
       done = false;
     const finish = (error, value) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      activeChildren.delete(child);
-      child.kill();
+      if (child) {
+        activeChildren.delete(child);
+        if (child.pid && !child.killed) child.kill();
+      }
       error ? reject(error) : resolve(value);
     };
-    const timer = setTimeout(
+    let timer;
+    try {
+      child = spawn(binary, ["app-server"], {
+        windowsHide: true,
+        env: { ...process.env, CODEX_HOME: codexHome },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      reject(new Error("无法启动 Codex App Server"));
+      return;
+    }
+    activeChildren.add(child);
+    timer = setTimeout(
       () => finish(new Error("额度查询超时；保留上次快照，稍后重试")),
       25000,
     );

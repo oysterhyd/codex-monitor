@@ -214,6 +214,18 @@ if (!app.requestSingleInstanceLock()) {
       return result.response === 1 ? request("assignAccount", value) : null;
     });
     handle("price", (value) => request("price", value));
+    handle("deletePrice", async (value) => {
+      const result = await dialog.showMessageBox(win, {
+        type: "warning",
+        title: tr("删除价格版本"),
+        message: tr("确认删除 {0} 的价格版本 v{1}？", value.model, value.id),
+        detail: tr("删除后，相关历史记录可能使用其他价格版本或显示为未定价。"),
+        buttons: [tr("取消"), tr("删除")],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      return result.response === 1 ? request("deletePrice", value.id) : null;
+    });
     handle("export", async (filter) => {
       const result = await dialog.showSaveDialog(win, {
         title: tr("导出当前筛选的用量"),

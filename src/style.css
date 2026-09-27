@@ -886,6 +886,16 @@ code {
   gap: 12px;
   margin-bottom: 15px;
 }
+.price-form-actions,
+.price-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.price-actions .button {
+  padding: 5px 9px;
+  font-size: 12px;
+}
 .price-form label {
   min-width: 0;
   display: flex;
