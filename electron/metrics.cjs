@@ -1,3 +1,6 @@
+const { activitySummary } = require('./activity.cjs');
+const recordMatches = (turn, project, search) =>
+  !search || [turn.id, turn.session, turn.model, project].some(value => String(value || '').toLowerCase().includes(search));
 function costOf(row, prices) {
   const p = prices.find(
     (p) => !p.retired && p.model === row.model && p.effective <= row.ts,
@@ -75,6 +78,8 @@ function bounds(filter = {}, now = new Date()) {
       throw new Error("请选择完整日期范围");
     start = new Date(filter.start + "T00:00:00");
     end = new Date(filter.end + "T00:00:00");
+    if (!Number.isFinite(+start) || !Number.isFinite(+end) || bucketOf(start.toISOString(), false) !== filter.start || bucketOf(end.toISOString(), false) !== filter.end)
+      throw new Error("日期范围无效");
     end.setDate(end.getDate() + 1);
   }
   if (!Number.isFinite(+start) || !Number.isFinite(+end) || end <= start)
@@ -100,7 +105,7 @@ function summarize(store, filter = {}) {
   // (settings, src/main.jsx:1405); options.projects only by the project filter, which
   // the .filters block renders for overview and history (src/main.jsx:828, :915). The
   // quota page reads none of them, yet DISTINCT model is a full scan of usage.
-  const optionsWanted = ['all', 'overview', 'history', 'settings'].includes(page);
+  const optionsWanted = ['all', 'overview', 'history', 'settings', 'activity'].includes(page);
   // options.sessions is read by no page: the string "sessions" does not occur anywhere
   // in src/main.jsx. (The comment that used to stand here claimed the settings page read
   // it; it does not.) On the 8,855-usage-row corpus it is 291 entries / 29.6K of every
@@ -230,8 +235,14 @@ function summarize(store, filter = {}) {
     aborted = turns.filter((t) => t.status === "aborted");
   const timed = completed.filter((t) => t.duration > 0);
   const latency = turns.filter((t) => t.ttft !== null);
-  const recordPage = Math.min(requestedPage, Math.max(1, Math.ceil(turns.length / pageSize)));
-  const selectedTurns = recordsWanted ? turns.slice((recordPage - 1) * pageSize, recordPage * pageSize) : [];
+  const search = String(filter.recordSearch || '').trim().toLowerCase();
+  const recordTurns = recordsWanted ? turns.filter(t =>
+    (!filter.recordStatus || t.status === filter.recordStatus) &&
+    recordMatches(t, sessionMap.get(t.session)?.project, search)
+  ) : [];
+  if (filter.recordOrder === 'oldest') recordTurns.reverse();
+  const recordPage = Math.min(requestedPage, Math.max(1, Math.ceil(recordTurns.length / pageSize)));
+  const selectedTurns = recordTurns.slice((recordPage - 1) * pageSize, recordPage * pageSize);
   const usageByTurn = new Map(), outputByTurn = new Map();
   if (analytics) {
     for (const r of store.sql(`SELECT t.id, COALESCE(SUM(u.output),0) output FROM turns t
@@ -331,6 +342,8 @@ function summarize(store, filter = {}) {
     if (outputByTurn.get(t.id) > 0) { latestSpeed = { ...t, output: outputByTurn.get(t.id) }; break; }
   }
   return {
+    activity: ['all', 'overview', 'activity'].includes(page)
+      ? activitySummary(store, filter, row => costWith(row, prices, pricesByModel)) : null,
     range: { start, end },
     sums: {
       ...sums,
@@ -380,7 +393,7 @@ function summarize(store, filter = {}) {
       })),
     turns: turnRecords,
     quotas: latest,
-    records: { page: recordPage, pageSize, total: turns.length, pages: Math.max(1,Math.ceil(turns.length/pageSize)) },
+    records: { page: recordPage, pageSize, total: recordTurns.length, pages: Math.max(1,Math.ceil(recordTurns.length/pageSize)) },
     quotaHistorySamples: historySamples,
     quotaHistory: history,
     quotaAccount,
@@ -453,10 +466,18 @@ function exportRows(store, filter) {
   if (filter.model) { conditions.push('u.model=?'); params.push(filter.model); }
   if (filter.session) { conditions.push('u.session=?'); params.push(filter.session); }
   if (filter.project) { conditions.push('s.project=?'); params.push(filter.project); }
+  if (filter.recordStatus) { conditions.push('t.status=?'); params.push(filter.recordStatus); }
+  const search = String(filter.recordSearch || '').trim().toLowerCase();
+  if (search || filter.recordStatus) {
+    conditions.push('t.started>=?', 't.started<?'); params.push(start, end);
+  }
   return store.sql(
-      `SELECT u.*,s.project FROM usage u LEFT JOIN sessions s ON s.id=u.session${filter.project ? ' AND s.project=?' : ''} WHERE ${conditions.join(' AND ')} ORDER BY u.ts`,
+      `SELECT u.*,s.project,t.id record_id,t.session record_session,t.model record_model FROM usage u LEFT JOIN sessions s ON s.id=u.session${filter.project ? ' AND s.project=?' : ''} LEFT JOIN turns t ON t.id=u.turn AND t.session=u.session WHERE ${conditions.join(' AND ')} ORDER BY u.ts`,
     )
     .all(...(filter.project ? [filter.project, ...params] : params))
-    .map((r) => ({ ...r, ...costWith(r, prices, pricesByModel) }));
+    // SQLite LOWER is ASCII-only; use the same Unicode/literal substring matching as
+    // the records view, so international project names and '%' export consistently.
+    .filter(r => recordMatches({id:r.record_id,session:r.record_session,model:r.record_model},r.project,search))
+    .map(({record_id, record_session, record_model, ...r}) => ({...r, ...costWith(r, prices, pricesByModel)}));
 }
 module.exports = { costOf, bounds, summarize, csv, exportRows, bucketOf };

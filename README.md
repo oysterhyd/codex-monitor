@@ -2,7 +2,7 @@
   <img src="assets/monitor-glass.png" width="112" alt="Codex Monitor" />
   <h1>Codex Monitor</h1>
   <p><b>Windows desktop app for monitoring local Codex usage and quotas</b></p>
-  <p>Token usage · API-equivalent cost · Cache hit rate · Task metrics · 5h / weekly quotas · Liquid-glass desktop widget</p>
+  <p>Token usage · Activity heatmap · Task records · 5h / weekly quotas · Glass interface and desktop widget</p>
   <p>
     <a href="https://github.com/oysterhyd/codex-monitor/releases/latest"><img src="https://img.shields.io/github/v/release/oysterhyd/codex-monitor" alt="Release" /></a>
     <a href="https://github.com/oysterhyd/codex-monitor/releases/latest"><img src="https://img.shields.io/badge/platform-Windows%20x64-0069c4" alt="Platform" /></a>
@@ -13,6 +13,7 @@
 <p align="center">
   <img src="assets/screenshots/app-overview.png" alt="Usage overview" />
 </p>
+<p align="center"><small>The overview and activity previews use demonstration data.</small></p>
 <p align="center">
   <img src="assets/screenshots/desktop-widget.png" width="380" alt="Desktop widget" />
 </p>
@@ -28,16 +29,24 @@ The installer is unsigned. Automatic updates and cross-device synchronization ar
 ## Features
 
 ### Overview
-Today's tokens with a yesterday comparison, API-equivalent estimated cost, cache hit rate, remaining quota, model distribution, and output speed. Time ranges: today / last 7 days / last 30 days / all / custom, filterable by model, project, task, and account, with smooth value transitions.
+Token usage, API-equivalent estimated cost, cache hit rate, remaining quota, model distribution, and output speed. Time ranges: today / last 7 days / last 30 days / all / custom, filterable by model, project, task, and account. Custom dates apply on confirmation, active filters appear as removable chips, and the trend switches between total tokens, output, and USD. Chart samples can be inspected with the keyboard.
+
+### Activity calendar
+A yearly heatmap of real local usage, with year selection and token / usage-record / USD views. Explore active days, current and longest streaks, hourly activity, and recent active dates. Select a day to inspect its totals and open that day's task records. Account, model, and project filters apply to the calendar, and CSV export covers the selected year. Future dates are disabled and unpriced costs remain unknown.
+
+![Activity calendar, demonstration data](assets/screenshots/activity-calendar.png)
 
 ### History
-Usage breakdowns by model, project, and task; paginated task records with per-model token and cost details on expansion. Unassigned records can be assigned by date range or per task; export the current filters as CSV (formula-like values are escaped).
+Search and sort usage breakdowns by model, project, and task. Task records support task / project / model search, status filters, newest / oldest order, pagination, and expandable per-model token and cost details. CSV export follows record search and status filters, including literal special characters and international project names. Formula-like CSV values are escaped.
 
 ### Quota
 Current-account 5h and weekly quota windows: remaining percentage, reset time, update time, and a step-chart history that preserves real sample boundaries and stays broken across resets.
 
 ### Settings
-Instant Chinese/English switching, system-following light/dark theme, launch at sign-in, quota alerts and query interval, data locations, model price versions (manual edits always add a new version), and account management.
+Settings are grouped into General, Accounts, Model pricing, and Data & storage. Switch Chinese/English instantly, choose system / light / dark appearance, configure launch at sign-in and quota alerts, inspect data locations, and manage account names. Model prices retain effective dates and support adding, editing, and deleting manual versions.
+
+### Interaction and shortcuts
+The glass gradients and top navigation remain, with a compact metric strip, clearer grouping, and motion for navigation, filters, charts, value changes, expanded details, and notifications. System reduced-motion settings are respected. `Ctrl+K` opens the command palette to find pages, models, or projects; `Alt+1`–`Alt+5` switch pages, `Ctrl+R` refreshes, and `Ctrl+E` exports. Visible windows receive collection updates immediately, and the interface can reload independently after a rendering failure.
 
 ### Desktop widget
 - Left-click the top-right dots to smoothly collapse the 560×380 card into a today-token orb; click the orb to expand. Right-click opens options.
