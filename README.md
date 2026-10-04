@@ -59,7 +59,7 @@ The glass gradients and top navigation remain, with a compact metric strip, clea
 - Left-click the top-right dots to smoothly collapse the 560×380 card into a today-token orb; click the orb to expand. Right-click opens options.
 - Pointer-following highlights, gentle card tilt, hover elevation, and press feedback bring the glass surface to life.
 - A top-bar switch toggles between the main window and the glass desktop card; the tray menu offers the same checkbox.
-- The card shows 5h / weekly remaining quota, live TPS, cache hit rate, today's tokens, and a 24-hour usage trend.
+- Today's tokens in both the card and collapsed orb cover **all local accounts, including unassigned Pi usage**, matching the dashboard's **Today / All accounts** view. Yesterday comparison, live TPS, cache hit rate, and the 24-hour trend use the same scope. 5h / weekly quota remains scoped to the current Codex account. The widget labels its usage scope and never rewrites account attribution.
 - Pinned above other windows by default; unpin from the card menu at any time.
 - In widget mode the card owns the taskbar slot, so the taskbar always offers an entry point; clicking it summons the widget.
 - Drag to move, double-click the header to return. Mode, position, and pin state persist locally across restarts.
