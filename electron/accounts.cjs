@@ -21,9 +21,10 @@ function readAccount(home) {
   } catch { return null; }
 }
 // Pi's Codex OAuth credential is read for identity only; never refresh or persist it.
-function readPiAccount(home) {
+function readPiAccount(home, provider = 'openai-codex') {
   try {
-    const credential = JSON.parse(fs.readFileSync(path.join(home, 'auth.json'), 'utf8'))['openai-codex'];
+    if (provider === 'openai' && !readPiOpenAIAuth(home)) return null;
+    const credential = JSON.parse(fs.readFileSync(path.join(home, 'auth.json'), 'utf8'))[provider];
     if (credential?.type !== 'oauth' || typeof credential.access !== 'string') return null;
     const claims = JSON.parse(Buffer.from(credential.access.split('.')[1], 'base64url').toString());
     const auth = claims['https://api.openai.com/auth'];
@@ -34,6 +35,31 @@ function readPiAccount(home) {
     const email = claims.email || claims['https://api.openai.com/profile']?.email;
     return { id, label: typeof email === 'string' && email.length < 200 ? email : `Account ${id.slice(0, 8)}` };
   } catch { return null; }
+}
+// New Pi OpenAI sign-in uses subscription direct-token OAuth, but writes the same
+// provider/api names as API-key requests. Inspect only local auth/config metadata;
+// never refresh credentials or retain the access token. A normal OpenAI key or an
+// overridden/proxied provider is NOT evidence of ChatGPT subscription usage.
+function readPiOpenAIAuth(home) {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(home, 'auth.json'), 'utf8')).openai;
+    if (c?.type !== 'oauth' || typeof c.access !== 'string') return false;
+    const claims = JSON.parse(Buffer.from(c.access.split('.')[1], 'base64url').toString());
+    const direct = 'chatgpt.tokens.use.direct';
+    const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    if (claims.iss !== 'https://auth.openai.com' || !audience.includes('https://api.openai.com/v1') ||
+        typeof claims.scope !== 'string' || !claims.scope.split(/\s+/).includes(direct) ||
+        !Array.isArray(c.scopes) || !c.scopes.includes(direct)) return false;
+    let override;
+    try { override = JSON.parse(fs.readFileSync(path.join(home, 'models.json'), 'utf8')).providers?.openai; }
+    catch (error) { if (error.code !== 'ENOENT') return false; }
+    if (override) {
+      if (override.apiKey || override.headers || (override.api && override.api !== 'openai-responses')) return false;
+      if (override.baseUrl && override.baseUrl.replace(/\/$/, '') !== 'https://api.openai.com/v1') return false;
+      if ((override.models || []).some(m => m.apiKey || m.headers || m.baseUrl || (m.api && m.api !== 'openai-responses'))) return false;
+    }
+    return true;
+  } catch { return false; }
 }
 function migrateAccounts(store) {
   store.db.exec(`CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,label TEXT NOT NULL,kind TEXT NOT NULL);
@@ -48,7 +74,7 @@ function migrateAccounts(store) {
   store.db.exec("CREATE INDEX IF NOT EXISTS quota_account_window_time ON quotas(account,bucket,slot,ts DESC)");
 }
 function observeAccount(store, home, now = new Date().toISOString(), source = 'codex') {
-  const account = source === 'pi' ? readPiAccount(home) : readAccount(home);
+  const account = source === 'pi' ? readPiAccount(home) : source === 'pi-openai' ? readPiAccount(home, 'openai') : readAccount(home);
   const id = account?.id || UNKNOWN;
   if (account) store.sql('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').run(id, account.label, 'detected');
   // Resume the persisted interval when the observed identity is unchanged.
@@ -109,4 +135,4 @@ function assignUnknown(store, input) {
     store.db.exec('COMMIT'); return count;
   } catch (error) { store.db.exec('ROLLBACK'); throw error; }
 }
-module.exports = { UNKNOWN, accountTables, readAccount, readPiAccount, migrateAccounts, observeAccount, accountAt, saveAccount, assignUnknown };
+module.exports = { UNKNOWN, accountTables, readAccount, readPiAccount, readPiOpenAIAuth, migrateAccounts, observeAccount, accountAt, saveAccount, assignUnknown };

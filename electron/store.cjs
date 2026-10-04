@@ -2,9 +2,9 @@ const { DatabaseSync } = require("node:sqlite");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { migrateAccounts, observeAccount, accountAt, UNKNOWN, accountTables } = require("./accounts.cjs");
+const { migrateAccounts, observeAccount, accountAt, UNKNOWN, accountTables, readPiOpenAIAuth } = require("./accounts.cjs");
 const officialPrices = require("./official-prices.cjs");
-const { processPi, interestingPi, PI_ORIGIN } = require("./pi-usage.cjs");
+const { processPi, interestingPi, PI_ORIGIN, PI_KIND, PI_OPENAI_KIND, PI_PARSER_VERSION } = require("./pi-usage.cjs");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 // Session rows without a cwd land under this label everywhere the project dimension
 // is keyed (store seed, metrics keying, renderer shortPath); keep one spelling.
@@ -434,7 +434,12 @@ class Store {
   }
   async scan(home, onProgress = () => {}, options = {}) {
     observeAccount(this, home);
-    if (options.piHome) observeAccount(this, options.piHome, new Date().toISOString(), 'pi');
+    this.piOpenaiOAuth = !!options.piHome && readPiOpenAIAuth(options.piHome);
+    if (options.piHome) {
+      const now = new Date().toISOString();
+      observeAccount(this, options.piHome, now, 'pi');
+      observeAccount(this, options.piHome, now, 'pi-openai');
+    }
     this.replayingRecovered = !!this.get("replayRecovered");
     // Per-scan caches. Writes are serialized behind the scan transaction, so the
     // clear boundary cannot move under it and already-seen rows cannot change.
@@ -476,8 +481,9 @@ class Store {
     }
     // Pi uses project directories, not dates. Check its catalog on every scan so
     // resuming an old session is noticed immediately; byte offsets avoid replay.
-    // Local corpus: 62 Pi files / 80.1 MB / 7,118 entries (Node 22.22), cold scan
-    // 273.01 ms; nine unchanged scans median 5.35 ms. scripts/pi-usage-check.cjs.
+    // Direct-token OAuth corpus: 62 files / 86.3 MB / 7,242 entries (Node 22.22),
+    // 367 usage rows, cold 411.48 ms; nine unchanged scans median 6.17 ms.
+    // Includes source/identity checks; reproduced by scripts/pi-usage-check.cjs.
     if (piSessions) walk(piSessions, true);
     const files = [...this.catalog].filter(([file,modified])=>full || this.piFiles.has(file) || now-modified<120000).map(([file])=>file);
     let changed = false;
@@ -498,14 +504,19 @@ class Store {
       }
       this.catalog.set(file,st.mtimeMs);
       const old = this.sql("SELECT * FROM files WHERE path=?").get(file);
-      if (old && old.offset === st.size && old.mtime === st.mtimeMs) {
+      const pi = this.piFiles.has(file);
+      const previousState = pi && old ? JSON.parse(old.state) : null;
+      // v2.4.0 consumed these bytes while rejecting the new OpenAI OAuth source.
+      // Revisit each Pi file once after the parser upgrade, even if size/mtime are
+      // unchanged. Dedup and the clear timestamp remain authoritative on replay.
+      const replayPi = pi && old && previousState.piParserVersion !== PI_PARSER_VERSION;
+      if (!replayPi && old && old.offset === st.size && old.mtime === st.mtimeMs) {
         scanned++;
         continue;
       }
       changed = true;
-      let offset = old && old.offset <= st.size ? old.offset : 0;
-      const state = offset && old ? JSON.parse(old.state) : {};
-      const pi = this.piFiles.has(file);
+      let offset = !replayPi && old && old.offset <= st.size ? old.offset : 0;
+      const state = offset && old ? (previousState || JSON.parse(old.state)) : {};
       if (!pi && state.desktop === false && offset) {
         this.sql("UPDATE files SET offset=?,mtime=? WHERE path=?")
           .run(st.size, st.mtimeMs, file);
@@ -543,6 +554,7 @@ class Store {
           }
           pending = data.subarray(start);
         }
+        if (pi) state.piParserVersion = PI_PARSER_VERSION;
         this.sql("INSERT OR REPLACE INTO files VALUES(?,?,?,?)")
           .run(file, offset, JSON.stringify(state), st.mtimeMs);
         this.db.exec("COMMIT");
@@ -555,15 +567,23 @@ class Store {
     }
     // Records appended while a scan was in progress may be read after the observation boundary.
     // On the next observation, attach only timestamps within this verified interval.
-    for (const source of ['codex', ...(options.piHome ? ['pi'] : [])]) {
+    for (const source of ['codex', ...(options.piHome ? ['pi', 'pi-openai'] : [])]) {
       const observation = this.sql('SELECT * FROM account_observations WHERE source=? ORDER BY id DESC LIMIT 1').get(source);
       if (!observation || observation.account === UNKNOWN) continue;
       for (const [table,time] of accountTables) {
-        if (source === 'pi' && table === 'quotas') continue;
-        // Independent logins: a desktop observation must never claim Pi rows.
-        const scope = table === 'quotas' ? '' : ` AND ${source === 'pi' ? '' : 'NOT '}EXISTS (SELECT 1 FROM sessions s WHERE s.id=${table}.session AND s.origin=?)`;
+        const piSource = source !== 'codex';
+        if (piSource && table === 'quotas') continue;
+        // Independent logins: desktop, legacy Pi, and direct-token Pi cannot claim
+        // each other's rows, even when both Pi providers share one session file.
+        let scope = table === 'quotas' ? '' : ` AND ${piSource ? '' : 'NOT '}EXISTS (SELECT 1 FROM sessions s WHERE s.id=${table}.session AND s.origin=?)`;
+        const scopeArgs = scope ? [PI_ORIGIN] : [];
+        if (piSource) {
+          const kind = source === 'pi' ? PI_KIND : PI_OPENAI_KIND;
+          scope += table === 'usage' ? ' AND kind=?' : ' AND EXISTS (SELECT 1 FROM usage u WHERE u.turn=turns.id AND u.session=turns.session AND u.kind=?)';
+          scopeArgs.push(kind);
+        }
         this.sql(`UPDATE ${table} SET account=? WHERE account=? AND ${time}>=? AND ${time}<=?${scope}`)
-          .run(observation.account, UNKNOWN, observation.started, observation.ended, ...(scope ? [PI_ORIGIN] : []));
+          .run(observation.account, UNKNOWN, observation.started, observation.ended, ...scopeArgs);
       }
     }
     const status = {
@@ -578,6 +598,7 @@ class Store {
       sourceExists: fs.existsSync(path.join(home, "sessions")) || !!(piSessions && fs.existsSync(piSessions)),
       piSourceExists: !!(piSessions && fs.existsSync(piSessions)),
       piFiles: this.piFiles.size,
+      piOpenaiOAuth: this.piOpenaiOAuth,
     };
     this.set("scan", status);
     if (this.replayingRecovered && !errors) this.set("replayRecovered",false);

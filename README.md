@@ -43,11 +43,11 @@ Search and sort usage breakdowns by model, project, and task. Task records suppo
 Current-account 5h and weekly quota windows: remaining percentage, reset time, update time, and a step-chart history that preserves real sample boundaries and stays broken across resets.
 
 ### Pi agent Codex usage
-Automatically imports historical and new token usage from Pi agent sessions when using the official Codex sign-in provider (`openai-codex`). OpenAI API-key and third-party providers are excluded. Cache reads/writes are included in total input; reasoning tokens are not counted twice. Re-scans, restarts, forks, and clones are deduplicated. Clearing monitor history does not modify the original files or re-import old usage.
+Automatically imports historical and new token usage from Pi agent sessions for both the legacy official Codex provider (`openai-codex`) and newer **Sign in with ChatGPT** subscription OAuth under `openai` / `openai-responses`. The new path requires local official direct-token OAuth metadata (`chatgpt.tokens.use.direct`); API-key configurations, custom proxies, and third-party providers are excluded. Cache reads/writes are included in total input; reasoning tokens are not counted twice. Re-scans, restarts, forks, and clones are deduplicated. Clearing monitor history does not modify the original files or re-import old usage.
 
-Pi and Codex Desktop logins are observed independently: matching accounts share statistics, different accounts stay isolated, and historical usage without a verifiable account remains **Unassigned** (visible under **All accounts**). Quota percentages still come from Codex App Server rather than a token-based estimate.
+Pi and Codex Desktop logins are observed independently: matching verified accounts share statistics, different accounts stay isolated, and usage without a verifiable account remains **Unassigned** (visible under **All accounts**). New OAuth tokens may encrypt account metadata; the app does not guess a desktop-account mapping. Quota percentages still come from Codex App Server rather than a token-based estimate.
 
-**中文：** 新增 pi agent 中官方登录 Codex 的用量统计，自动补录历史与采集新增记录，排除 API Key 和其他供应商；正确统计缓存与推理 token，支持去重、账号隔离和清空边界。无法确认历史账号的记录保留为「未归属」，可在「全部账号」查看。
+**中文：** 支持 pi agent 旧版 `openai-codex` 和新版 `openai` 官方订阅 OAuth 登录，自动补录历史与采集新增记录；当前 API Key、代理配置和其他供应商不采集。升级后重新扫描此前读过的 pi 文件，保留去重与清空边界。无法解析账号信息的记录保留为「未归属」，可在「全部账号」查看。
 
 ### Settings
 Settings are grouped into General, Accounts, Model pricing, and Data & storage. Switch Chinese/English instantly, choose system / light / dark appearance, configure launch at sign-in and quota alerts, inspect data locations, and manage account names. Model prices retain effective dates and support adding, editing, and deleting manual versions.
@@ -71,8 +71,9 @@ Closing the window keeps incremental collection running in the tray with open / 
 ## How it works
 
 - Read-only scanning of `%CODEX_HOME%` (default `%USERPROFILE%\.codex`) `sessions/` and `archived_sessions/`. Only `originator === "Codex Desktop"` records are counted (including desktop subagents); CLI and IDE-extension sessions are excluded.
-- Also scans Pi sessions read-only, defaulting to `%USERPROFILE%\.pi\agent\sessions`. Only official `openai-codex` assistant responses using `openai-codex-responses`, and `usage` entries with an explicit provider/model, are counted. Summary usage without verifiable provider attribution is excluded.
-- Pi directories can be overridden with `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`, or monitor-specific `MONITOR_PI_HOME` / `MONITOR_PI_SESSIONS`. For Pi's `--session-dir`, set `MONITOR_PI_SESSIONS` to that directory. Unsaved `--no-session` usage cannot be collected. The configured path is shown in **Settings → Data & storage**.
+- Also scans Pi sessions read-only, defaulting to `%USERPROFILE%\.pi\agent\sessions`. Legacy `openai-codex` / `openai-codex-responses` and verified subscription OAuth `openai` / `openai-responses` responses are supported, along with `usage` entries with an explicit provider/model. Summary usage without verifiable provider attribution is excluded.
+- Newer Pi `openai` logs do not persist each request's authentication method. Historical source recognition uses the current local subscription OAuth configuration, not independent per-request proof; if the same provider was used with API keys before, interpret historical totals accordingly. Parser upgrades replay consumed Pi files while preserving response deduplication and clear-history boundaries.
+- Pi directories can be overridden with `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`, or monitor-specific `MONITOR_PI_HOME` / `MONITOR_PI_SESSIONS`. For Pi's `--session-dir`, set `MONITOR_PI_SESSIONS` to that directory. Unsaved `--no-session` usage cannot be collected. The configured path and OpenAI subscription OAuth detection status are shown in **Settings → Data & storage**.
 - New-format usage records are deduplicated by `response_id`; legacy `token_count` snapshots use cumulative differencing.
 - Quotas are read through the local Codex app-server (`account/rateLimits/read`) — no model requests are created and no Codex files are modified.
 - Recent files are scanned every 3 seconds and all directories re-checked every 60 seconds; the quota query interval is configurable between 60–300 seconds.

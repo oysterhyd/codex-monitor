@@ -150,6 +150,9 @@ export function Settings({ data, act, busy, initialSection = "general" }) {
           <code>{data.paths.piSessions || "—"}</code>
         </div>
         <p className="panel-note">{tr("自动统计 pi 中官方登录的 Codex 用量，不含 API Key 和其他供应商。历史账号无法确认时保留为未归属，不改变额度查询来源。")}</p>
+        <p className="panel-note">{data.scan?.piOpenaiOAuth
+          ? tr("已识别 pi 的 OpenAI 官方订阅登录（OAuth）。")
+          : tr("pi 的 OpenAI 来源需识别官方订阅 OAuth；API Key 或自定义代理配置不计入。")}</p>
         <div className="path-row">
           <span>{tr("监测数据库目录")}</span>
           <code>{data.paths.data}</code>

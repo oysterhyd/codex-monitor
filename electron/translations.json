@@ -146,6 +146,8 @@
   "额度查询间隔": "Quota refresh interval",
   "分钟": " min",
   "数据来源": "Data sources",
+  "已识别 pi 的 OpenAI 官方订阅登录（OAuth）。": "Pi OpenAI subscription sign-in (OAuth) detected.",
+  "pi 的 OpenAI 来源需识别官方订阅 OAuth；API Key 或自定义代理配置不计入。": "Pi OpenAI usage requires a detected official subscription OAuth login; API-key and custom proxy configurations are excluded.",
   "pi 会话目录": "Pi session directory",
   "自动统计 pi 中官方登录的 Codex 用量，不含 API Key 和其他供应商。历史账号无法确认时保留为未归属，不改变额度查询来源。": "Automatically counts Codex usage from official sign-in in Pi, excluding API keys and other providers. Unverifiable historical accounts remain unassigned; the quota query source is unchanged.",
   "只删除本应用统计；Codex 与 pi 原始记录、价格和设置保留。之后仅采集新增记录。": "Deletes this app’s statistics only. Codex and Pi source records, pricing, and settings are retained. Only new records will be collected afterward.",

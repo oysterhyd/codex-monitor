@@ -1,6 +1,6 @@
 const { activitySummary, dayKey } = require('./activity.cjs');
 const { UNKNOWN } = require('./accounts.cjs');
-const { PI_KIND } = require('./pi-usage.cjs');
+const { PI_KIND, PI_OPENAI_KIND } = require('./pi-usage.cjs');
 const { UNASSIGNED_PROJECT } = require('./store.cjs');
 const recordMatches = (turn, project, search) =>
   !search || [turn.id, turn.session, turn.model, project].some(value => String(value || '').toLowerCase().includes(search));
@@ -188,7 +188,7 @@ function summarize(store, filter = {}) {
     const c = costWith(r, prices, pricesByModel);
     Object.assign(r, c);
     sums.requests++;
-    if (r.kind !== "逐次记录" && r.kind !== PI_KIND) sums.legacyRequests++;
+    if (r.kind !== "逐次记录" && r.kind !== PI_KIND && r.kind !== PI_OPENAI_KIND) sums.legacyRequests++;
     for (const k of ["input", "cached", "output", "reasoning", "cache_write"])
       sums[k] += r[k];
     if (c.cost === null) sums.unpriced++;
