@@ -1,10 +1,13 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {CalendarDots, CaretLeft, CaretRight, ArrowUpRight, X, Flame, Clock} from '@phosphor-icons/react';
 import {tr, dateFormat} from './i18n.mjs';
-import {compact, full, money} from './format.mjs';
+import {compact, full, money, moneyLabel} from './format.mjs';
 import {calendarCells, heatLevel} from './activity-calendar.mjs';
 
 const valueText = (day, metric) => metric === 'cost' ? money(day?.cost) : full(day?.[metric] || 0);
+// The unit suffix is part of both the aria label and the tooltip; one helper keeps
+// the two orders (tokens / record / USD) from drifting.
+const unitLabel = (metric) => metric === 'total' ? 'tokens' : metric === 'requests' ? tr('用量记录') : 'USD';
 
 export function ActivityCalendar({activity, onYear, onDay, compactView = false, onOpen}) {
   const [metric, setMetric] = useState('total'), [hover, setHover] = useState(null), [selected, setSelected] = useState(null), [focusDay, setFocusDay] = useState(null);
@@ -61,17 +64,17 @@ export function ActivityCalendar({activity, onYear, onDay, compactView = false, 
           <div className="calendar-weekdays" aria-hidden="true"><span>{tr('一')}</span><span>{tr('三')}</span><span>{tr('五')}</span><span>{tr('日')}</span></div>
           <div className="calendar-grid" ref={grid} role="group" aria-label={tr('活动日历，使用方向键选择日期')} style={{'--weeks': cells.length / 7}}>
             {cells.map((cell, index) => !cell.inYear ? <span key={cell.date} className="heat-spacer"/> : <button key={cell.date} className={`heat-cell level-${heatLevel(days.get(cell.date)?.[metric], max)}${cell.date === activity.today ? ' is-today' : ''}${selected === cell.date ? ' is-selected' : ''}`}
-              data-date={cell.date} aria-label={`${cell.date} · ${valueText(days.get(cell.date) || {cost: 0}, metric)} ${metric === 'total' ? 'tokens' : metric === 'requests' ? tr('用量记录') : 'USD'}${days.get(cell.date)?.unpriced ? ' · ' + tr('部分未定价') : ''}`}
+              data-date={cell.date} aria-label={`${cell.date} · ${valueText(days.get(cell.date) || {cost: 0}, metric)} ${unitLabel(metric)}${days.get(cell.date)?.unpriced ? ' · ' + tr('部分未定价') : ''}`}
               aria-pressed={selected === cell.date} disabled={cell.date > activity.today} tabIndex={(focusDay || fallbackFocus) === cell.date ? 0 : -1}
               onMouseEnter={event => show(event, cell)} onFocus={event => {setFocusDay(cell.date); show(event, cell);}} onBlur={() => setHover(null)} onKeyDown={event => navigate(event, index)} onClick={() => {setSelected(cell.date); setHover(null);}}/>)}
           </div>
         </div>
       </div>
-      {hover && <div className="heat-tooltip" role="tooltip" style={{left: hover.left, top: hover.top - 66}}><b>{hover.cell.date}</b><span>{valueText(days.get(hover.cell.date) || {cost: 0}, metric)} {metric === 'total' ? 'tokens' : metric === 'cost' ? 'USD' : tr('用量记录')}{days.get(hover.cell.date)?.unpriced ? ' · ' + tr('部分未定价') : ''}</span></div>}
+      {hover && <div className="heat-tooltip" role="tooltip" style={{left: hover.left, top: hover.top - 66}}><b>{hover.cell.date}</b><span>{valueText(days.get(hover.cell.date) || {cost: 0}, metric)} {unitLabel(metric)}{days.get(hover.cell.date)?.unpriced ? ' · ' + tr('部分未定价') : ''}</span></div>}
     </div>
     <div className="calendar-caption"><span>{tr('按本地日期统计 · 点击日期查看记录')}</span><div className="heat-legend"><span>{tr('少')}</span>{[0,1,2,3,4].map(level => <i key={level} className={`heat-cell level-${level}`}/>)}<span>{tr('多')}</span></div></div>
     {chosen && <div className="day-inspector" key={chosen.date}>
-      <b>{chosen.date}</b><span><strong>{compact(chosen.total)}</strong> tokens</span><span>{chosen.requests} {tr('用量记录')} · {chosen.sessions} {tr('个任务')}</span><span>{money(chosen.cost)}{chosen.unpriced ? ' + ' + tr('未定价') : ''}</span>
+      <b>{chosen.date}</b><span><strong>{compact(chosen.total)}</strong> tokens</span><span>{chosen.requests} {tr('用量记录')} · {chosen.sessions} {tr('个任务')}</span><span>{moneyLabel(chosen.cost, chosen.unpriced)}</span>
       <button className="button" onClick={() => onDay(chosen.date)}>{tr('查看当天记录')}<ArrowUpRight size={14}/></button><button className="icon-button" aria-label={tr('收起日期详情')} onClick={() => setSelected(null)}><X size={16}/></button>
     </div>}
   </section>;

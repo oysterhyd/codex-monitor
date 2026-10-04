@@ -39,7 +39,11 @@ export function App() {
   // `view` is part of the snapshot request: the history breakdown maps are built per view
   // (only filter.view is populated), so a missing view makes 按项目 / 按任务 render empty.
   requestFilter.current = {...filter,page,recordPage,pageSize:50,view};
-  const snapshotPending = !!api && (!data || data.chartTransitionKey !== JSON.stringify(requestFilter.current));
+  // Only actual filter changes reset pagination; request identity also includes the
+  // selected page, view and recordPage, so using it as a reset key traps page 2 at 1.
+  const filterKey = useMemo(() => JSON.stringify(filter), [filter]);
+  const requestKey = useMemo(() => JSON.stringify(requestFilter.current), [filter, page, recordPage, view]);
+  const snapshotPending = !!api && (!data || data.chartTransitionKey !== requestKey);
   const refresh = useRef(null);
   if(!refresh.current) refresh.current=createRefresh(
     async value=>({...await api.snapshot(value), chartRange: value.range, chartTransitionKey: JSON.stringify(value)}),
@@ -49,10 +53,10 @@ export function App() {
   function load() { if(api) return refresh.current.request(requestFilter.current); }
   useEffect(() => {
     setRecordPage(1); setExpanded(null);
-  },[JSON.stringify(filter)]);
+  },[filterKey]);
   useEffect(() => {
     load();
-  }, [JSON.stringify(filter),page,recordPage,view]);
+  }, [requestKey]);
   useEffect(() => {
     const timer=setInterval(()=>{if(!document.hidden)load();},30000);
     const wake=()=>{if(!document.hidden)load();};
@@ -117,16 +121,22 @@ export function App() {
       setBusy(false);
     }
   };
+  // Both actions are wired from three places each (shortcut, button, command palette);
+  // the guard lives here so the three entry points cannot drift apart.
+  const refreshNow = () => { if (!busy && api) act(() => api.refresh(), tr("数据已刷新")); };
   const choose = useCallback((key, value) => setFilter((f) => ({ ...f, [key]: value })), []);
   const showQuota = useCallback(() => setPage("quota"), []);
-  const showTasks = useCallback(() => { setPage("history"); setView("tasks"); }, []);
-  const showPrices = useCallback(() => {setSettingsSection("prices"); setPage("settings");}, []);
-  const showModels = useCallback(() => { setPage("history"); setView("models"); }, []);
+  // One history-page opener: the breakdown view is the only variant between callers.
+  const showHistory = useCallback((view) => { setPage("history"); setView(view); }, []);
+  const showTasks = useCallback(() => showHistory("tasks"), [showHistory]);
+  const showModels = useCallback(() => showHistory("models"), [showHistory]);
   const selectModel = useCallback((name) => { choose("model", name); setPage("history"); }, [choose]);
+  const showPrices = useCallback(() => {setSettingsSection("prices"); setPage("settings");}, []);
   const activityYear = data?.activity?.year || new Date().getFullYear();
   const exportFilter = page === 'history' ? filter : page === 'activity'
     ? {...filter, range: 'custom', start: `${activityYear}-01-01`, end: activityYear === new Date().getFullYear() ? localDay() : `${activityYear}-12-31`, recordSearch: '', recordStatus: ''}
     : {...filter, recordSearch: '', recordStatus: ''};
+  const exportCsv = () => { if (!busy && data && api && !snapshotPending) act(() => api.export(exportFilter), tr("CSV 已导出")); };
   const enterWidgetMode = async event => {
     const on = event.target.checked;
     if (widgetPending) return;
@@ -162,8 +172,8 @@ export function App() {
       if (event.ctrlKey && event.key.toLowerCase() === "k") {event.preventDefault(); setCommandOpen(value => !value); return;}
       if (commandOpen || event.target.closest("input,select,textarea,[contenteditable=true]")) return;
       if (event.altKey && /^[1-5]$/.test(event.key)) {event.preventDefault(); setPage(nav[Number(event.key) - 1][0]);}
-      if (event.ctrlKey && event.key.toLowerCase() === "r") {event.preventDefault(); if (!busy && api) act(() => api.refresh(), tr("数据已刷新"));}
-      if (event.ctrlKey && event.key.toLowerCase() === "e") {event.preventDefault(); if (!busy && data && api && !snapshotPending) act(() => api.export(exportFilter), tr("CSV 已导出"));}
+      if (event.ctrlKey && event.key.toLowerCase() === "r") {event.preventDefault(); refreshNow();}
+      if (event.ctrlKey && event.key.toLowerCase() === "e") {event.preventDefault(); exportCsv();}
     };
     document.addEventListener("keydown", keydown);
     return () => document.removeEventListener("keydown", keydown);
@@ -176,6 +186,8 @@ export function App() {
     const from = nav.findIndex(([id]) => id === entered.current.page);
     entered.current = { page, side: nav.findIndex(([id]) => id === page) > from ? " enter-left" : " enter-right" };
   }
+  // Page title and context share the snapshot-derived year and read once per render.
+  const pageTitle = { overview: "用量总览", activity: "活动日历", history: "历史分析", quota: "账户额度", settings: "设置与价格" }[page];
   const s = data?.sums,
     p = data?.performance,
     quotas = data?.quotas || [],
@@ -238,7 +250,7 @@ export function App() {
               aria-label={tr("刷新数据与额度")}
               title={tr("刷新数据与额度")}
               disabled={busy || !api}
-              onClick={() => act(() => api.refresh(), tr("数据已刷新"))}
+              onClick={refreshNow}
             >
               <ArrowClockwise size={18} className={busy ? "spin" : ""} />
             </button>
@@ -247,8 +259,8 @@ export function App() {
       <main>
         <div key={page} aria-busy={snapshotPending} className={`content${page === "settings" ? " settings-content" : ""}${entered.current.side}`}>
           <div className="page-title">
-            <div className="page-heading"><h1 ref={heading} tabIndex={-1}>{page === "overview" ? tr("用量总览") : page === "activity" ? tr("活动日历") : page === "history" ? tr("历史分析") : page === "quota" ? tr("账户额度") : tr("设置与价格")}</h1><span className="page-context">{page === "activity" ? String(data?.activity?.year || new Date().getFullYear()) : page === "settings" ? (data?.version ? `v${data.version}` : "") : data?.range ? date(data.range.start) + " — " + date(Date.parse(data.range.end) - 1) : ""}</span></div>
-            {page !== "settings" && <button className="button export-button" disabled={busy || snapshotPending || !data || !api} onClick={() => act(() => api.export(exportFilter), tr("CSV 已导出"))}><DownloadSimple size={16}/>{tr("导出 CSV")}</button>}
+            <div className="page-heading"><h1 ref={heading} tabIndex={-1}>{tr(pageTitle)}</h1><span className="page-context">{page === "activity" ? String(activityYear) : page === "settings" ? (data?.version ? `v${data.version}` : "") : data?.range ? date(data.range.start) + " — " + date(Date.parse(data.range.end) - 1) : ""}</span></div>
+            {page !== "settings" && <button className="button export-button" disabled={busy || snapshotPending || !data || !api} onClick={exportCsv}><DownloadSimple size={16}/>{tr("导出 CSV")}</button>}
           </div>
           {!api && (
             <div className="alert">{tr("请使用 Windows 应用启动；浏览器预览不连接本机数据。")}</div>
@@ -409,7 +421,7 @@ export function App() {
                         view={view}
                         setView={setView}
                         choose={choose}
-                        resetKey={JSON.stringify(filter)}
+                        resetKey={filterKey}
                         lang={lang}
                       />
                     </Panel>
@@ -547,7 +559,7 @@ export function App() {
           )}
         </div>
       </main>
-      {commandOpen && <CommandPalette nav={nav} data={data} onNavigate={setPage} onChoose={(key, value) => {choose(key, value); setPage("history");}} onRefresh={() => act(() => api.refresh(), tr("数据已刷新"))} onExport={() => {if (!snapshotPending) act(() => api.export(exportFilter), tr("CSV 已导出"));}} onClose={() => setCommandOpen(false)}/>}
+      {commandOpen && <CommandPalette nav={nav} data={data} onNavigate={setPage} onChoose={(key, value) => {choose(key, value); setPage("history");}} onRefresh={refreshNow} onExport={exportCsv} onClose={() => setCommandOpen(false)}/>}
       {toast && (
         <div className="toast" role="status">
           <CheckCircle size={18} />

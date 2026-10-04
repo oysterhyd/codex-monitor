@@ -1,4 +1,6 @@
 {
+  "pi 官方 Codex": "Pi official Codex",
+  "pi · 官方 Codex": "Pi · official Codex",
   "日志": "Log",
   "在线查询": "Live query",
   "手动设置": "Manual",
@@ -48,15 +50,6 @@
   "账号筛选": "Filter by account",
   "全部账号": "All accounts",
   "当前登录": "Signed in",
-  "历史账号归属": "Historical account attribution",
-  "将当前时间范围内全部未归属记录指定给所选账号？": "Assign all unassigned records in this date range to the selected account?",
-  "确认归属": "Assign records",
-  "缺少账号信息的旧记录保留为未归属。确认日期范围后，可将该范围内全部未归属用量、任务和额度记录指定给一个账号。": "Historical records without account metadata remain unassigned. After checking the date range, you can assign all unassigned usage, tasks, and quota snapshots in that range to an account.",
-  "归属账号": "Assign to account",
-  "选择账号": "Select account",
-  "账号归属已更新": "Account attribution updated",
-  "指定未归属记录": "Assign unassigned records",
-  "可在设置中添加历史账号；此操作不受模型、项目筛选影响。": "Add historical accounts in Settings. Model and project filters do not limit this operation.",
   "账号管理": "Account management",
   "自动识别本机登录账号；仅保存账号标识摘要和显示名称，不保存登录凭据。可添加历史账号并修改显示名称。": "Detects local sign-in accounts. Stores only a hashed account identifier and display name, never credentials. Add historical accounts or edit display names here.",
   "账号已保存": "Account saved",
@@ -64,8 +57,5 @@
   "添加账号": "Add account",
   "保存": "Save",
   "账号名称须为 1–100 个字符": "Account name must contain 1–100 characters",
-  "账号不存在": "Account does not exist",
-  "将此任务的全部用量记录归属到所选账号？此操作不修改额度快照。": "Assign all usage records of this task to the selected account? Quota snapshots will not be changed.",
-  "任务归属账号": "Task account",
-  "归属此任务": "Assign this task"
+  "账号不存在": "Account does not exist"
 }

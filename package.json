@@ -1,6 +1,6 @@
 {
   "name": "codex-monitor",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Local Windows Codex desktop usage monitor",
   "private": true,
   "author": "Codex Monitor",
@@ -21,7 +21,9 @@
       "dist/**/*",
       "electron/**/*",
       "package.json",
-      "assets/**/*"
+      "assets/icon.ico",
+      "assets/icon.png",
+      "assets/monitor-glass.png"
     ],
     "win": {
       "target": "nsis",

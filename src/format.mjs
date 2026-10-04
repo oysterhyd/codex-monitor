@@ -28,6 +28,8 @@ export const TICK_FORMATS = {
 export const compact = (n) => (n == null ? "—" : compactFormat.format(n));
 export const full = (n) => (n == null ? "—" : fullFormat.format(n));
 export const money = (n) => (n == null ? "—" : "$" + moneyFormat.format(n));
+// Keep the existing unpriced suffix consistent across charts, ranks and day details.
+export const moneyLabel = (n, unpriced) => money(n) + (unpriced ? tr(" + 未定价") : "");
 export const pct = (n) => (n == null ? "—" : (n * 100).toFixed(1) + "%");
 export const wholePercent = (n) => (n == null ? "—" : n.toFixed(0) + "%");
 export const recordMoney = (n, t) => !t.requests ? "—" : n == null ? tr("未定价") :

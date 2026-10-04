@@ -42,6 +42,13 @@ Search and sort usage breakdowns by model, project, and task. Task records suppo
 ### Quota
 Current-account 5h and weekly quota windows: remaining percentage, reset time, update time, and a step-chart history that preserves real sample boundaries and stays broken across resets.
 
+### Pi agent Codex usage
+Automatically imports historical and new token usage from Pi agent sessions when using the official Codex sign-in provider (`openai-codex`). OpenAI API-key and third-party providers are excluded. Cache reads/writes are included in total input; reasoning tokens are not counted twice. Re-scans, restarts, forks, and clones are deduplicated. Clearing monitor history does not modify the original files or re-import old usage.
+
+Pi and Codex Desktop logins are observed independently: matching accounts share statistics, different accounts stay isolated, and historical usage without a verifiable account remains **Unassigned** (visible under **All accounts**). Quota percentages still come from Codex App Server rather than a token-based estimate.
+
+**中文：** 新增 pi agent 中官方登录 Codex 的用量统计，自动补录历史与采集新增记录，排除 API Key 和其他供应商；正确统计缓存与推理 token，支持去重、账号隔离和清空边界。无法确认历史账号的记录保留为「未归属」，可在「全部账号」查看。
+
 ### Settings
 Settings are grouped into General, Accounts, Model pricing, and Data & storage. Switch Chinese/English instantly, choose system / light / dark appearance, configure launch at sign-in and quota alerts, inspect data locations, and manage account names. Model prices retain effective dates and support adding, editing, and deleting manual versions.
 
@@ -64,6 +71,8 @@ Closing the window keeps incremental collection running in the tray with open / 
 ## How it works
 
 - Read-only scanning of `%CODEX_HOME%` (default `%USERPROFILE%\.codex`) `sessions/` and `archived_sessions/`. Only `originator === "Codex Desktop"` records are counted (including desktop subagents); CLI and IDE-extension sessions are excluded.
+- Also scans Pi sessions read-only, defaulting to `%USERPROFILE%\.pi\agent\sessions`. Only official `openai-codex` assistant responses using `openai-codex-responses`, and `usage` entries with an explicit provider/model, are counted. Summary usage without verifiable provider attribution is excluded.
+- Pi directories can be overridden with `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`, or monitor-specific `MONITOR_PI_HOME` / `MONITOR_PI_SESSIONS`. For Pi's `--session-dir`, set `MONITOR_PI_SESSIONS` to that directory. Unsaved `--no-session` usage cannot be collected. The configured path is shown in **Settings → Data & storage**.
 - New-format usage records are deduplicated by `response_id`; legacy `token_count` snapshots use cumulative differencing.
 - Quotas are read through the local Codex app-server (`account/rateLimits/read`) — no model requests are created and no Codex files are modified.
 - Recent files are scanned every 3 seconds and all directories re-checked every 60 seconds; the quota query interval is configurable between 60–300 seconds.
@@ -71,11 +80,11 @@ Closing the window keeps incremental collection running in the tray with open / 
 
 ## Metrics and privacy
 
-- Quota belongs to the currently signed-in account and may include usage from other devices. Token statistics cover locally available Codex Desktop records only.
+- Quota belongs to the currently signed-in account and may include usage from other devices. Token statistics cover locally available Codex Desktop and identifiable official Codex usage in Pi.
 - Cache hit rate = cached input tokens ÷ input tokens (token-weighted); no fake 0% is shown when there is no input.
 - API-equivalent cost is an estimate using Standard short-context API rates — not a subscription bill. Fast, long-context, and regional adjustments are not recognized; default prices ship for major models, other models can be priced manually as new versions.
 - Live TPS divides output tokens recorded in the last 60 seconds by 60, including idle time; it is not exact generation throughput. History shows the per-task average output rate.
-- Only statistical records are parsed; message and tool bodies are never stored. Credentials stay local. Accounts are identified by a SHA-256 digest of the login user and account pair — no passwords, tokens, or API keys are saved.
+- Only statistical metadata is persisted; message and tool bodies are never stored. Pi candidate messages are parsed transiently because usage fields follow assistant content. Credentials stay local. Accounts are identified by a SHA-256 digest of the login user and account pair — no passwords, tokens, or API keys are saved.
 - All data stays on the local computer. No telemetry, no sync. Clearing history keeps prices and settings.
 
 ## Build from source
@@ -89,7 +98,7 @@ npm start
 npm run package
 ```
 
-Built installers are written to `release/`. Browser-only development (`npm run dev`) previews the shell without connecting to local account data.
+Built installers are written to `release/` and include only runtime assets, not documentation screenshots or local test files. Browser-only development (`npm run dev`) previews the shell without connecting to local account data.
 
 ## Stack
 

@@ -1,10 +1,14 @@
-const { activitySummary } = require('./activity.cjs');
+const { activitySummary, dayKey } = require('./activity.cjs');
+const { UNKNOWN } = require('./accounts.cjs');
+const { PI_KIND } = require('./pi-usage.cjs');
+const { UNASSIGNED_PROJECT } = require('./store.cjs');
 const recordMatches = (turn, project, search) =>
   !search || [turn.id, turn.session, turn.model, project].some(value => String(value || '').toLowerCase().includes(search));
+function findPrice(prices, row) {
+  return prices.find((p) => !p.retired && p.model === row.model && p.effective <= row.ts);
+}
 function costOf(row, prices) {
-  const p = prices.find(
-    (p) => !p.retired && p.model === row.model && p.effective <= row.ts,
-  );
+  const p = findPrice(prices, row);
   if (!p) return { cost: null, inputCost: null, outputCost: null, saved: null, priceId: null };
   const plain = Math.max(0, row.input - row.cached - row.cache_write);
   return {
@@ -22,8 +26,9 @@ function costOf(row, prices) {
 }
 // costOf() needs the latest non-retired price per model whose effective date has
 // already passed. store.prices() is ordered so that this is the first match, which
-// lets the scan stop at the first hit instead of walking the whole price history
-// for every usage row. Input order is preserved so ties resolve identically.
+// lets prices.find() stop at the first hit instead of walking the whole price
+// history for every usage row. priceIndex() narrows that find to one model's
+// already-non-retired rows; ties resolve identically because input order is kept.
 function priceIndex(prices) {
   const index = new Map();
   for (const p of prices) {
@@ -34,34 +39,9 @@ function priceIndex(prices) {
   }
   return index;
 }
-function pickPrice(bucket, ts) {
-  // prices() is ordered effective DESC, and the original prices.find() returned the
-  // FIRST element satisfying the predicate, i.e. the most recent applicable price.
-  // Scanning forwards preserves that; scanning backwards would pick the oldest one.
-  for (let i = 0; i < bucket.length; i++) {
-    if (bucket[i].effective <= ts) return bucket[i];
-  }
-  return null;
-}
 function costWith(row, prices, index) {
   const bucket = index && index.get(row.model);
-  const p = bucket ? pickPrice(bucket, row.ts) : prices.find(
-    (p) => !p.retired && p.model === row.model && p.effective <= row.ts,
-  );
-  if (!p) return { cost: null, inputCost: null, outputCost: null, saved: null, priceId: null };
-  const plain = Math.max(0, row.input - row.cached - row.cache_write);
-  return {
-    inputCost: (plain * p.input + row.cached * p.cached + row.cache_write * p.cache_write) / 1e6,
-    outputCost: row.output * p.output / 1e6,
-    cost:
-      (plain * p.input +
-        row.cached * p.cached +
-        row.cache_write * p.cache_write +
-        row.output * p.output) /
-      1e6,
-    saved: (row.cached * (p.input - p.cached)) / 1e6,
-    priceId: p.id,
-  };
+  return costOf(row, bucket || prices);
 }
 function bounds(filter = {}, now = new Date()) {
   let start = new Date(now.getFullYear(), now.getMonth(), now.getDate()),
@@ -87,15 +67,18 @@ function bounds(filter = {}, now = new Date()) {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 function bucketOf(ts, hourly) {
-  const d = new Date(ts),
-    pad = (v) => String(v).padStart(2, "0");
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    (hourly ? ` ${pad(d.getHours())}:00` : "")
-  );
+  // The date part is activity.cjs's dayKey — one local-day string for both modules.
+  const date = new Date(ts);
+  return dayKey(date) + (hourly ? ` ${String(date.getHours()).padStart(2, '0')}:00` : "");
 }
+// "current" is a renderer-side alias for the signed-in account; both snapshot paths
+// resolve it the same way. UNKNOWN (accounts.cjs) owns the unassigned sentinel.
+const resolveAccount = (store, filter) =>
+  filter.account === "current"
+    ? { ...filter, account: store.get("currentAccount") || UNKNOWN }
+    : filter;
 function summarize(store, filter = {}) {
-  if (filter.account === "current") filter = {...filter, account: store.get("currentAccount") || "unassigned"};
+  filter = resolveAccount(store, filter);
   const { start, end } = bounds(filter);
   const page = filter.page || 'all';
   const analytics = ['all', 'overview', 'history'].includes(page);
@@ -131,10 +114,14 @@ function summarize(store, filter = {}) {
   const requestedPage = Math.max(1, Math.floor(Number(filter.recordPage) || 1));
   const prices = store.prices();
   const pricesByModel = priceIndex(prices);
-  const sessions = store.sql("SELECT * FROM sessions").all(),
+  // Quota renders no session options or breakdown. A project-filtered active-turn
+  // count still needs the map, even on that page; keep that uncommon path intact.
+  // scripts/simplification-benchmark.cjs (1,000 sessions / 12,000 usage rows,
+  // Node 22.22, 11-round medians): account-scoped quota snapshot 2.509 → 0.454 ms.
+  const sessions = optionsWanted || filter.project ? store.sql("SELECT * FROM sessions").all() : [],
     sessionMap = new Map(sessions.map((s) => [s.id, s]));
   // Resolve account membership once, rather than querying each session twice per snapshot.
-  const accountSessions = filter.account
+  const accountSessions = filter.account && optionsWanted
     ? new Set(store.sql("SELECT DISTINCT session FROM usage WHERE account=?").all(filter.account).map(r => r.session))
     : null;
   const availableSessions = accountSessions ? sessions.filter(s => accountSessions.has(s.id)) : sessions;
@@ -183,7 +170,7 @@ function summarize(store, filter = {}) {
   const maps = { models, projects, tasks };
   const keyByView = {
     models: (r) => r.model,
-    projects: (r) => sessionMap.get(r.session)?.project || "未归属项目",
+    projects: (r) => sessionMap.get(r.session)?.project || UNASSIGNED_PROJECT,
     tasks: (r) => r.session,
   };
   const hourly = filter.range === "today" || !filter.range;
@@ -201,7 +188,7 @@ function summarize(store, filter = {}) {
     const c = costWith(r, prices, pricesByModel);
     Object.assign(r, c);
     sums.requests++;
-    if (r.kind !== "逐次记录") sums.legacyRequests++;
+    if (r.kind !== "逐次记录" && r.kind !== PI_KIND) sums.legacyRequests++;
     for (const k of ["input", "cached", "output", "reasoning", "cache_write"])
       sums[k] += r[k];
     if (c.cost === null) sums.unpriced++;
@@ -241,7 +228,8 @@ function summarize(store, filter = {}) {
     recordMatches(t, sessionMap.get(t.session)?.project, search)
   ) : [];
   if (filter.recordOrder === 'oldest') recordTurns.reverse();
-  const recordPage = Math.min(requestedPage, Math.max(1, Math.ceil(recordTurns.length / pageSize)));
+  const recordPages = Math.max(1, Math.ceil(recordTurns.length / pageSize));
+  const recordPage = Math.min(requestedPage, recordPages);
   const selectedTurns = recordTurns.slice((recordPage - 1) * pageSize, recordPage * pageSize);
   const usageByTurn = new Map(), outputByTurn = new Map();
   if (analytics) {
@@ -259,10 +247,9 @@ function summarize(store, filter = {}) {
     }
   }
   const emptyTotals = () => ({input:0,cached:0,output:0,inputCost:0,outputCost:0,cost:0,unpriced:0,requests:0});
-  const add = (total,row) => {
+  const add = (total,row,price) => {
     total.requests++;
     for(const key of ['input','cached','output']) total[key]+=row[key];
-    const price=costWith(row,prices,pricesByModel);
     if(price.cost===null) total.unpriced++;
     else for(const key of ['inputCost','outputCost','cost']) total[key]+=price[key];
   };
@@ -273,15 +260,28 @@ function summarize(store, filter = {}) {
   const turnRecords = selectedTurns.map(t => {
     const totals=emptyTotals(), models=new Map();
     for(const row of usageByTurn.get(t.id)||[]) {
-      add(totals,row);
+      // One price lookup per row serves both the turn total and its per-model entry.
+      const price=costWith(row,prices,pricesByModel);
+      add(totals,row,price);
       if(!models.has(row.model)) models.set(row.model,{model:row.model,...emptyTotals()});
-      add(models.get(row.model),row);
+      add(models.get(row.model),row,price);
     }
-    return {...t,...finish(totals),models:[...models.values()].map(finish),project:sessionMap.get(t.session)?.project||'未归属项目'};
+    return {...t,...finish(totals),models:[...models.values()].map(finish),project:sessionMap.get(t.session)?.project||UNASSIGNED_PROJECT};
   });
-  const speeds = timed.map(t=>({...t,output:outputByTurn.get(t.id)||0})).filter(t=>t.output>0);
-  const duration = speeds.reduce((s, t) => s + t.duration, 0),
-    output = speeds.reduce((s, t) => s + t.output, 0);
+  // taskTps needs only two sums; the per-turn speed list itself is consumed by no
+  // rendering, so the timed turns are folded without materialising a spread copy
+  // of each row. turns is ordered started DESC, id DESC, so the FIRST turn with
+  // recorded output is the newest speed sample the overview reports.
+  // With this fold plus one turn-row price lookup, the same 12,000-row synthetic
+  // benchmark reports history 44.063 → 40.181 ms; no per-turn arrays are retained.
+  let duration = 0, output = 0, latestSpeed = null;
+  for (const turn of timed) {
+    const tokens = outputByTurn.get(turn.id) || 0;
+    if (tokens <= 0) continue;
+    duration += turn.duration;
+    output += tokens;
+    if (!latestSpeed) latestSpeed = { ...turn, output: tokens };
+  }
   // Running turns. The account predicate carries BOTH disjuncts the shipped filter used: a turn
   // counts when its OWN row carries the account, or when a usage row for that (turn,session)
   // does. Dropping the first half silently loses turns that have no usage row under the filtered
@@ -296,7 +296,7 @@ function summarize(store, filter = {}) {
     ORDER BY t.started DESC,t.id DESC`)
     .all(captureCutoff, filter.account || null, filter.account || null, filter.account || null);
   const active = activeTurns.filter(accepts);
-  const quotaAccount = filter.account || store.get('currentAccount') || 'unassigned';
+  const quotaAccount = filter.account || store.get('currentAccount') || UNKNOWN;
   const quotaWhere = 'account=? AND ';
   const quotaParams = [quotaAccount];
   const analyticsAccountParams = filter.account ? [filter.account] : [];
@@ -304,6 +304,8 @@ function summarize(store, filter = {}) {
     (SELECT DISTINCT account,bucket,slot FROM quotas WHERE account=?) b JOIN quotas q ON q.rowid=(
       SELECT rowid FROM quotas WHERE account=b.account AND bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)
     `).all(...quotaParams);
+  // One kv read serves both the quota status response and its account gate below.
+  const storedQuotaStatus = store.get("quotaStatus");
   const history = [];
   let historySamples = 0;
   if(historyWanted) {
@@ -335,12 +337,6 @@ function summarize(store, filter = {}) {
     history.push(...[...points.values()].sort((a,b)=>a.ts.localeCompare(b.ts)));
   }
   const rank = (map) => Object.values(map).sort((a, b) => b.total - a.total);
-  // turns is ordered started DESC, id DESC, so the first turn with recorded output is
-  // the newest speed sample — the same row the previous in-memory scan picked.
-  let latestSpeed = null;
-  for (const t of timed) {
-    if (outputByTurn.get(t.id) > 0) { latestSpeed = { ...t, output: outputByTurn.get(t.id) }; break; }
-  }
   return {
     activity: ['all', 'overview', 'activity'].includes(page)
       ? activitySummary(store, filter, row => costWith(row, prices, pricesByModel)) : null,
@@ -373,13 +369,12 @@ function summarize(store, filter = {}) {
         ? latestSpeed.output / (latestSpeed.duration / 1000)
         : null,
       latestAt: latestSpeed?.ended || null,
-      exactTps: null,
     },
     models: rank(models),
     projects: rank(projects),
     tasks: rank(tasks).map((t) => ({
       ...t,
-      project: sessionMap.get(t.name)?.project || "未归属项目",
+      project: sessionMap.get(t.name)?.project || UNASSIGNED_PROJECT,
     })),
     timeline: Object.values(timeline)
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -393,12 +388,12 @@ function summarize(store, filter = {}) {
       })),
     turns: turnRecords,
     quotas: latest,
-    records: { page: recordPage, pageSize, total: recordTurns.length, pages: Math.max(1,Math.ceil(recordTurns.length/pageSize)) },
+    records: { page: recordPage, pageSize, total: recordTurns.length, pages: recordPages },
     quotaHistorySamples: historySamples,
     quotaHistory: history,
     quotaAccount,
     scan: store.get("scan"),
-    quotaStatus: store.get("quotaStatus")?.account === quotaAccount ? store.get("quotaStatus") : null,
+    quotaStatus: storedQuotaStatus?.account === quotaAccount ? storedQuotaStatus : null,
     currentAccount: store.get("currentAccount"),
     accounts: store.sql("SELECT * FROM accounts ORDER BY label,id").all(),
     coverage: store.sql(`SELECT MIN(ts) first,MAX(ts) last,COUNT(*) records FROM usage ${filter.account ? "WHERE account=?" : ""}`)
@@ -452,7 +447,7 @@ function csv(rows) {
   );
 }
 function exportRows(store, filter) {
-  if (filter.account === "current") filter = {...filter, account: store.get("currentAccount") || "unassigned"};
+  filter = resolveAccount(store, filter);
   const { start, end } = bounds(filter),
     prices = store.prices();
   const pricesByModel = priceIndex(prices);
@@ -480,4 +475,4 @@ function exportRows(store, filter) {
     .filter(r => recordMatches({id:r.record_id,session:r.record_session,model:r.record_model},r.project,search))
     .map(({record_id, record_session, record_model, ...r}) => ({...r, ...costWith(r, prices, pricesByModel)}));
 }
-module.exports = { costOf, bounds, summarize, csv, exportRows, bucketOf };
+module.exports = { costOf, bounds, summarize, csv, exportRows };

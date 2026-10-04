@@ -3,6 +3,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { Store } = require('./store.cjs');
 
+const WAL_SUFFIXES = ['', '-wal', '-shm'];
 function openStore(file) {
   if (!fs.existsSync(file)) return new Store(file);
   let source;
@@ -20,7 +21,7 @@ function openStore(file) {
   }
   const backup = path.join(path.dirname(file), 'recovery-backups', new Date().toISOString().replace(/[:.]/g,'-'));
   fs.mkdirSync(backup,{recursive:true});
-  for (const suffix of ['', '-wal', '-shm']) {
+  for (const suffix of WAL_SUFFIXES) {
     if (fs.existsSync(file+suffix)) fs.copyFileSync(file+suffix,path.join(backup,path.basename(file)+suffix));
   }
   if (!source) throw new Error('监测数据库损坏，原文件已备份；无法读取设置，请从备份恢复。');
@@ -61,7 +62,11 @@ function openStore(file) {
         if(table==='quotas' && (typeof row.id!=='string'||typeof row.bucket!=='string'||!['primary','secondary'].includes(row.slot)||typeof row.used!=='number'||row.used<0||row.used>100||!Number.isFinite(Date.parse(row.ts))||(row.plan!==null&&typeof row.plan!=='string')||(typeof row.source!=='string'))) {skipped[table]=(skipped[table]||0)+1;continue;}
         if (table === 'usage' && (typeof row.id !== 'string' || typeof row.session !== 'string' || typeof row.model !== 'string' || !Number.isFinite(Date.parse(row.ts)) || ['input','cached','output','reasoning','cache_write'].some(k => row[k] !== null && (typeof row[k] !== 'number' || !Number.isFinite(row[k]) || row[k] < 0)))) { skipped[table]=(skipped[table]||0)+1;continue; }
         const keys=columns.filter(k=>Object.hasOwn(row,k));
-        try { fresh.db.prepare(`INSERT ${table==='kv'||table==='prices'||table==='accounts'?'':'OR IGNORE'} INTO ${table}(${keys.join(',')}) VALUES(${keys.map(()=>'?').join(',')})`).run(...keys.map(k=>row[k])); }
+        // SQL text is constant per table, so Store.sql() compiles the INSERT once and
+        // reuses it across all salvaged rows (recovery can walk hundreds of thousands).
+        // Synthetic 10,000-row INSERT-only comparison: prepare/row 32.051 ms vs cached
+        // 8.609 ms, 11-round median (scripts/simplification-benchmark.cjs, Node 22.22).
+        try { fresh.sql(`INSERT ${table==='kv'||table==='prices'||table==='accounts'?'':'OR IGNORE'} INTO ${table}(${keys.join(',')}) VALUES(${keys.map(()=>'?').join(',')})`).run(...keys.map(k=>row[k])); }
         catch { if(table==='kv'||table==='prices')throw new Error('设置或价格恢复失败');skipped[table]=(skipped[table]||0)+1; }
       }
     }
@@ -73,7 +78,7 @@ function openStore(file) {
     fresh.close();
   } catch(error) {try{fresh.db.exec('ROLLBACK');fresh.close();}catch{}throw error;}
   // Keep the original files intact; the complete replacement is checked before activation.
-  for(const suffix of ['','-wal','-shm'])if(fs.existsSync(file+suffix))fs.renameSync(file+suffix,path.join(backup,'original'+suffix+'.sqlite'));
+  for(const suffix of WAL_SUFFIXES)if(fs.existsSync(file+suffix))fs.renameSync(file+suffix,path.join(backup,'original'+suffix+'.sqlite'));
   fs.copyFileSync(staging,file);
   return new Store(file);
 }

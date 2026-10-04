@@ -11,7 +11,7 @@ const {
 } = require("electron");
 const { WorkerManager } = require("./worker-manager.cjs");
 const { readQuota, stopQueries } = require("./quota.cjs");
-const { createWidget } = require("./widget-window.cjs");
+const { createWidget, savedWidgetMode } = require("./widget-window.cjs");
 const path = require("node:path"),
   fs = require("node:fs"),
   os = require("node:os");
@@ -24,6 +24,8 @@ let win,
   widgetMode = false;
 const { translate } = require("./translate.cjs");
 const tr = (message, ...values) => translate(settings.language, message, ...values);
+// App icon: notification, dashboard window and tray share this one path.
+const iconPath = path.join(__dirname, "../assets/icon.png");
 const smoke = process.env.MONITOR_TEST_DATA;
 if (smoke) app.setPath("userData", path.resolve(smoke));
 if (!app.requestSingleInstanceLock()) {
@@ -62,21 +64,31 @@ if (!app.requestSingleInstanceLock()) {
     if (win && !win.isDestroyed()) win.webContents.send("update", data);
     if (widget && !widget.window.isDestroyed() && widget.window.isVisible()) widget.window.webContents.send("update");
   }
+  // The single place settings land in the running app: nativeTheme and the tray rebuild
+  // must follow every settings write, whether it came from the renderer or a worker reply.
+  function applySettings(next) {
+    settings = next;
+    nativeTheme.themeSource = settings.theme;
+    trayMenu();
+    notifyUI();
+    return settings;
+  }
+  function refreshQuietly() {
+    request("refresh").catch(() => {});
+  }
   function trayMenu() {
     tray.setToolTip(tr("Codex Monitor · 本机用量监测"));
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: tr("打开 Codex Monitor"), click: restoreMain },
         { label: "桌面小组件 / Desktop widget", type: "checkbox", checked: widgetMode, click: item => setWidgetMode(item.checked) },
-        { label: tr("刷新额度"), click: () => request("refresh").catch(() => {}) },
+        { label: tr("刷新额度"), click: refreshQuietly },
         {
           label: tr("静音提醒"),
           type: "checkbox",
           checked: !!settings.muted,
           click: async (item) => {
-            settings = await request("settings", { muted: item.checked }).catch(()=>settings);
-            notifyUI();
-            trayMenu();
+            applySettings(await request("settings", { muted: item.checked }).catch(()=>settings));
           },
         },
         { type: "separator" },
@@ -94,13 +106,22 @@ if (!app.requestSingleInstanceLock()) {
     app.setAppUserModelId("local.codex.monitor");
     const data = app.getPath("userData");
     fs.mkdirSync(data, { recursive: true });
-    try { widgetMode = JSON.parse(fs.readFileSync(path.join(data, "widget-window.json"), "utf8")).mode === true; } catch {}
+    try { widgetMode = savedWidgetMode(data); } catch {}
+    // One Codex-home resolution serves the worker's scanner and the snapshot paths.
+    const codexHome =
+      process.env.MONITOR_CODEX_HOME ||
+      process.env.CODEX_HOME ||
+      path.join(os.homedir(), ".codex");
+    const piHome = process.env.MONITOR_PI_HOME || process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent');
+    // Test profiles never read personal Pi sessions unless explicitly requested.
+    const piSessions = process.env.MONITOR_PI_SESSIONS ||
+      (process.env.MONITOR_TEST_DATA && !process.env.MONITOR_PI_HOME ? null :
+        process.env.PI_CODING_AGENT_SESSION_DIR || path.join(piHome, 'sessions'));
     worker = new WorkerManager(path.join(__dirname, "worker.cjs"), {
         db: path.join(data, "monitor.sqlite"),
-        home:
-          process.env.MONITOR_CODEX_HOME ||
-          process.env.CODEX_HOME ||
-          path.join(os.homedir(), ".codex"),
+        home: codexHome,
+        piHome: piSessions ? piHome : null,
+        piSessions,
     });
     worker.on("message", async (msg, reply) => {
       if (msg.type === "readQuota") {
@@ -133,7 +154,7 @@ if (!app.requestSingleInstanceLock()) {
                   new Notification({
                     title: tr("Codex 额度提醒"),
                     body: tr("{0} · {1} 分钟窗口剩余 {2}%", q.limitName || q.limitId || "Codex", w.windowDurationMins, remaining.toFixed(0)),
-                    icon: path.join(__dirname, "../assets/icon.png"),
+                    icon: iconPath,
                   }).show();
               }
           }
@@ -148,7 +169,7 @@ if (!app.requestSingleInstanceLock()) {
       show: false,
       backgroundColor: "#111514",
       title: "Codex Monitor",
-      icon: path.join(__dirname, "../assets/icon.png"),
+      icon: iconPath,
       webPreferences: {
         preload: path.join(__dirname, "preload.cjs"),
         contextIsolation: true,
@@ -169,13 +190,14 @@ if (!app.requestSingleInstanceLock()) {
     win.once("ready-to-show", () => {
       if (!process.argv.includes("--hidden") && !widgetMode && !win.isMinimized()) win.show();
     });
-    tray = new Tray(path.join(__dirname, "../assets/icon.png"));
-    tray.setToolTip(tr("Codex Monitor · 本机用量监测"));
+    tray = new Tray(iconPath);
     tray.on("double-click", restoreMain);
     trayMenu();
-    const handle = (name, fn) =>
+    // One sender gate serves every window family: the dashboard channels below and
+    // the widget: loop after createWidget. The check stays per-handler by design.
+    const handle = (name, fn, sender = win.webContents) =>
       ipcMain.handle(name, (event, arg) => {
-        if (event.sender !== win.webContents) throw new Error(tr("无效来源"));
+        if (event.sender !== sender) throw new Error(tr("无效来源"));
         return fn(arg);
       });
     handle("snapshot", async (filter) => {
@@ -183,36 +205,23 @@ if (!app.requestSingleInstanceLock()) {
       settings = s.settings;
       return {
         ...s,
-        paths: {
-          data,
-          home:
-            process.env.MONITOR_CODEX_HOME ||
-            process.env.CODEX_HOME ||
-            path.join(os.homedir(), ".codex"),
-        },
+        paths: { data, home: codexHome, piSessions },
         version: app.getVersion(),
       };
     });
     handle("refresh", () => request("refresh"));
     handle("settings", async (value) => {
-      settings = await request("settings", value);
-      nativeTheme.themeSource = settings.theme;
+      const next = applySettings(await request("settings", value));
       if (!smoke && typeof value.autoStart === "boolean")
         app.setLoginItemSettings({
-          openAtLogin: settings.autoStart,
+          openAtLogin: next.autoStart,
           path: app.getPath("exe"),
           args: ["--hidden"],
         });
-      trayMenu();
-      notifyUI();
-      return settings;
+      return next;
     });
     handle("account", value => request("account", value));
     handle("widgetMode", (on) => { if (typeof on === 'boolean') setWidgetMode(on); return widgetMode; });
-    handle("assignAccount", async value => {
-      const result = await dialog.showMessageBox(win, { type: "question", title: tr("历史账号归属"), message: value.turn ? tr("将此任务的全部用量记录归属到所选账号？此操作不修改额度快照。") : tr("将当前时间范围内全部未归属记录指定给所选账号？"), buttons: [tr("取消"), tr("确认归属")], defaultId: 0, cancelId: 0 });
-      return result.response === 1 ? request("assignAccount", value) : null;
-    });
     handle("price", (value) => request("price", value));
     handle("deletePrice", async (value) => {
       const result = await dialog.showMessageBox(win, {
@@ -243,7 +252,7 @@ if (!app.requestSingleInstanceLock()) {
         title: tr("清空监测历史"),
         message: tr("删除本应用已采集的用量和额度历史？"),
         detail:
-          tr("Codex 原始文件不会被修改。仅继续采集此刻之后的数据；已有历史不会自动重新导入。价格和设置保留。"),
+          tr("Codex 与 pi 原始文件不会被修改。仅继续采集此刻之后的数据；已有历史不会自动重新导入。价格和设置保留。"),
         buttons: [tr("取消"), tr("清空历史")],
         defaultId: 0,
         cancelId: 0,
@@ -262,22 +271,14 @@ if (!app.requestSingleInstanceLock()) {
     });
     handle("openData", () => shell.openPath(data));
     await win.loadFile(path.join(__dirname, "../dist/index.html"));
-    widget = createWidget({ data, restore: restoreMain, refresh: () => request("refresh").catch(() => {}) });
+    widget = createWidget({ data, restore: restoreMain, refresh: refreshQuietly });
     if (widgetMode) widget.show();
     for (const [name, fn] of Object.entries({ snapshot: () => request("widget"), restore: restoreMain,
       menu: () => widget.menu(), anchor: () => widget.anchor(), hover: hit => widget.hover(hit), drag: payload => widget.drag(payload), refresh: () => request("refresh") })) {
-      ipcMain.handle(`widget:${name}`, (event, arg) => {
-        if (event.sender !== widget.window.webContents) throw new Error(tr("无效来源"));
-        return fn(arg);
-      });
+      handle(`widget:${name}`, fn, widget.window.webContents);
     }
     request("snapshot", {})
-      .then((s) => {
-        settings = s.settings;
-        nativeTheme.themeSource = settings.theme;
-        trayMenu();
-        notifyUI();
-      })
+      .then((s) => applySettings(s.settings))
       .catch(() => {});
   });
   let databaseClosed=false,pendingShutdown=false;

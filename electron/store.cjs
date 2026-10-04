@@ -2,9 +2,13 @@ const { DatabaseSync } = require("node:sqlite");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { migrateAccounts, observeAccount, accountAt, UNKNOWN } = require("./accounts.cjs");
+const { migrateAccounts, observeAccount, accountAt, UNKNOWN, accountTables } = require("./accounts.cjs");
 const officialPrices = require("./official-prices.cjs");
+const { processPi, interestingPi, PI_ORIGIN } = require("./pi-usage.cjs");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
+// Session rows without a cwd land under this label everywhere the project dimension
+// is keyed (store seed, metrics keying, renderer shortPath); keep one spelling.
+const UNASSIGNED_PROJECT = "未归属项目";
 const iso = (value) => {
   const n = Date.parse(value);
   return Number.isFinite(n) ? new Date(n).toISOString() : null;
@@ -68,21 +72,8 @@ class Store {
     `);
     migrateAccounts(this);
     if (!this.get("seeded")) {
-      const rates = officialPrices.rates;
-      for (const [model, input, cached, output, write] of rates)
-        this.db
-          .prepare(
-            "INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)",
-          )
-          .run(
-            model,
-            "1970-01-01T00:00:00.000Z",
-            input,
-            cached,
-            output,
-            write,
-            officialPrices.source,
-          );
+      for (const [model, input, cached, output, write] of officialPrices.rates)
+        this.seedPrice(model, input, cached, output, write, officialPrices.source);
       this.set("seeded", true);
     }
     if (
@@ -119,18 +110,7 @@ class Store {
           if (!old.length) continue;
           for (const row of old)
             this.sql("UPDATE prices SET retired=1 WHERE id=?").run(row.id);
-          this.sql(
-              "INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)",
-            )
-            .run(
-              model,
-              "1970-01-01T00:00:00.000Z",
-              input,
-              cached,
-              output,
-              write,
-              officialPrices.source,
-            );
+          this.seedPrice(model, input, cached, output, write, officialPrices.source);
         }
         this.set("standard-price-correction-v1", true);
         this.db.exec("COMMIT");
@@ -144,8 +124,7 @@ class Store {
       try {
         for (const [model,input,cached,output,write] of officialPrices.rates.filter(r => ["gpt-5.5","gpt-5.4"].includes(r[0]))) {
           if (this.sql("SELECT 1 FROM prices WHERE model=? AND retired=0").get(model)) continue;
-          this.sql("INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)")
-            .run(model,"1970-01-01T00:00:00.000Z",input,cached,output,write,"Standard 标准价 · 短上下文 · 官网核对 2026-09-10；历史按此基准估算");
+          this.seedPrice(model, input, cached, output, write, "Standard 标准价 · 短上下文 · 官网核对 2026-09-10；历史按此基准估算");
         }
         this.set("legacy-model-prices-v1",true);
         this.db.exec("COMMIT");
@@ -162,8 +141,9 @@ class Store {
     }
     return stmt;
   }
-  exec(text) {
-    this.db.exec(text);
+  settings() {
+    if (!this.parsedSettings) this.parsedSettings = { ...defaults, ...this.get("settings") };
+    return { ...this.parsedSettings };
   }
   // Drop the cached settings snapshot. Call after any out-of-band kv write that
   // touches "settings" so a later settings() re-reads it.
@@ -186,10 +166,6 @@ class Store {
     if (!this.readCache) this.readCache = new Map();
     if (!this.readCache.has(key)) this.readCache.set(key, this.get(key));
     return this.readCache.get(key);
-  }
-  settings() {
-    if (!this.parsedSettings) this.parsedSettings = { ...defaults, ...this.get("settings") };
-    return { ...this.parsedSettings };
   }
   saveSettings(input) {
     const next = this.settings();
@@ -232,18 +208,7 @@ class Store {
         "UPDATE prices SET model=?,effective=?,input=?,cached=?,output=?,cache_write=? WHERE id=?",
       ).run(p.model, effective, p.input, p.cached, p.output, p.cache_write, p.id);
     } else {
-      this.sql(
-          "INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)",
-        )
-        .run(
-          p.model,
-          effective,
-          p.input,
-          p.cached,
-          p.output,
-          p.cache_write,
-          "手动设置",
-        );
+      this.seedPrice(p.model, p.input, p.cached, p.output, p.cache_write, "手动设置", effective);
     }
     return this.prices();
   }
@@ -263,13 +228,25 @@ class Store {
       )
       .all();
   }
-  addQuota(raw, ts, source = "日志", account = accountAt(this, ts)) {
+  // One insert helper serves the seeder, both rate-correction migrations, and
+  // savePrice's new-version branch; edits of existing manual rows stay separate.
+  seedPrice(model, input, cached, output, write, source, effective = "1970-01-01T00:00:00.000Z") {
+    this.sql("INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)")
+      .run(model, effective, input, cached, output, write, source);
+  }
+  addQuota(raw, ts, source = "日志", account) {
+    // Within a scan the clear boundary cannot move (writes serialize behind the scan
+    // transaction), so addQuota reads the same snapshot process() does. The account
+    // attribution is deferred until after the guards: quota-less token_count records
+    // would otherwise pay the (memoized but nonzero) interval lookup and discard it.
+    const cleared = (this.scanSettings || this.settings()).clearedAt;
     if (
       !raw ||
       !iso(ts) ||
-      (this.settings().clearedAt && ts <= this.settings().clearedAt)
+      (cleared && ts <= cleared)
     )
       return;
+    if (account === undefined) account = accountAt(this, ts);
     const bucket = String(raw.limitId || raw.limit_id || "codex");
     for (const slot of ["primary", "secondary"]) {
       const w = raw[slot];
@@ -301,7 +278,7 @@ class Store {
     if (o.type === "session_meta") {
       s.session = p.id;
       s.desktop = p.originator === "Codex Desktop";
-      s.project = p.cwd || "未归属项目";
+      s.project = p.cwd || UNASSIGNED_PROJECT;
       if (s.desktop && s.session)
         this.sql("INSERT OR IGNORE INTO sessions VALUES(?,?,?,?)")
           .run(s.session, s.project, "Codex Desktop", ts);
@@ -450,13 +427,14 @@ class Store {
         number(u.reasoning_output_tokens) ?? 0,
         number(u.cache_write_input_tokens) ?? 0,
         kind,
-        this.storedAccount(id, ts),
+        s.account ?? this.storedAccount(id, ts),
       );
     if (s.turn)
       this.sql("UPDATE turns SET model=?,last_seen=? WHERE id=?").run(s.model || "unknown", ts, s.turn);
   }
   async scan(home, onProgress = () => {}, options = {}) {
     observeAccount(this, home);
+    if (options.piHome) observeAccount(this, options.piHome, new Date().toISOString(), 'pi');
     this.replayingRecovered = !!this.get("replayRecovered");
     // Per-scan caches. Writes are serialized behind the scan transaction, so the
     // clear boundary cannot move under it and already-seen rows cannot change.
@@ -464,14 +442,24 @@ class Store {
     this.accountMemo = new Map();
     this.accountMemoByTime = new Map();
     const now = Date.now();
-    const full = options.full || !this.catalog || this.catalogHome !== home || now - this.lastDiscovery >= 60000;
-    if(full) { this.catalog = new Map(); this.catalogHome=home; }
-    const walk = (dir) => {
-      if (!fs.existsSync(dir)) return;
-      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const piSessions = options.piSessions || null;
+    const full = options.full || !this.catalog || this.catalogHome !== home || this.catalogPiSessions !== piSessions || now - this.lastDiscovery >= 60000;
+    if(full) { this.catalog = new Map(); this.piFiles = new Set(); this.catalogHome=home; this.catalogPiSessions=piSessions; }
+    const walk = (dir, pi = false) => {
+      // readdirSync's ENOENT (dated dirs for days with no sessions) is the only
+      // common failure, so one try replaces an existsSync probe per directory.
+      // Synthetic 100-rollout / 10-dir full scan: existsSync 13 → 1, readdirSync
+      // 11 → 12 (missing archive); see scripts/simplification-benchmark.cjs.
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+      catch (error) { if (error.code === 'ENOENT') return; throw error; }
+      for (const e of entries) {
         const f = path.join(dir, e.name);
-        if (e.isDirectory()) walk(f);
-        else if (e.isFile() && e.name.endsWith('.jsonl') && !this.catalog.has(f)) this.catalog.set(f,now);
+        if (e.isDirectory()) walk(f, pi);
+        else if (e.isFile() && e.name.endsWith('.jsonl')) {
+          if (!this.catalog.has(f)) this.catalog.set(f,now);
+          if (pi) this.piFiles.add(f);
+        }
       }
     };
     if(full) {
@@ -486,7 +474,12 @@ class Store {
           walk(path.join(home,'sessions',...parts.map((n,i)=>i?String(n).padStart(2,'0'):String(n))));
       }
     }
-    const files = [...this.catalog].filter(([,modified])=>full || now-modified<120000).map(([file])=>file);
+    // Pi uses project directories, not dates. Check its catalog on every scan so
+    // resuming an old session is noticed immediately; byte offsets avoid replay.
+    // Local corpus: 62 Pi files / 80.1 MB / 7,118 entries (Node 22.22), cold scan
+    // 273.01 ms; nine unchanged scans median 5.35 ms. scripts/pi-usage-check.cjs.
+    if (piSessions) walk(piSessions, true);
+    const files = [...this.catalog].filter(([file,modified])=>full || this.piFiles.has(file) || now-modified<120000).map(([file])=>file);
     let changed = false;
     const diagnostics = [];
     const report = (code,file) => {
@@ -512,7 +505,8 @@ class Store {
       changed = true;
       let offset = old && old.offset <= st.size ? old.offset : 0;
       const state = offset && old ? JSON.parse(old.state) : {};
-      if (state.desktop === false && offset) {
+      const pi = this.piFiles.has(file);
+      if (!pi && state.desktop === false && offset) {
         this.sql("UPDATE files SET offset=?,mtime=? WHERE path=?")
           .run(st.size, st.mtimeMs, file);
         scanned++;
@@ -532,13 +526,16 @@ class Store {
             const line = data.subarray(start, index);
             offset += index - start + 1;
             start = index + 1;
-            // Only statistical records are parsed. Message and tool bodies are never stored.
+            // Codex parses statistical records only. Pi usage follows assistant content,
+            // so Pi candidate messages are parsed transiently; bodies are never stored.
             // The head is already decoded for dispatch, so it is also used to reject the
             // event_msg subtypes process() would ignore before paying for JSON.parse.
             const head = line.subarray(0, 180).toString("utf8");
-            if (INTERESTING.test(head)) {
+            if (pi ? interestingPi(head) : INTERESTING.test(head)) {
               try {
-                this.process(JSON.parse(line.toString("utf8")), state);
+                const record = JSON.parse(line.toString("utf8"));
+                if (pi) processPi(this, record, state);
+                else this.process(record, state);
               } catch {
                 errors++; report('record_parse',file);
               }
@@ -558,10 +555,16 @@ class Store {
     }
     // Records appended while a scan was in progress may be read after the observation boundary.
     // On the next observation, attach only timestamps within this verified interval.
-    const observation = this.sql("SELECT * FROM account_observations WHERE id=?").get(this.observationId);
-    if (observation?.account !== UNKNOWN) {
-      for (const [table,time] of [["usage","ts"],["turns","started"],["quotas","ts"]])
-        this.sql(`UPDATE ${table} SET account=? WHERE account=? AND ${time}>=? AND ${time}<=?`).run(observation.account,UNKNOWN,observation.started,observation.ended);
+    for (const source of ['codex', ...(options.piHome ? ['pi'] : [])]) {
+      const observation = this.sql('SELECT * FROM account_observations WHERE source=? ORDER BY id DESC LIMIT 1').get(source);
+      if (!observation || observation.account === UNKNOWN) continue;
+      for (const [table,time] of accountTables) {
+        if (source === 'pi' && table === 'quotas') continue;
+        // Independent logins: a desktop observation must never claim Pi rows.
+        const scope = table === 'quotas' ? '' : ` AND ${source === 'pi' ? '' : 'NOT '}EXISTS (SELECT 1 FROM sessions s WHERE s.id=${table}.session AND s.origin=?)`;
+        this.sql(`UPDATE ${table} SET account=? WHERE account=? AND ${time}>=? AND ${time}<=?${scope}`)
+          .run(observation.account, UNKNOWN, observation.started, observation.ended, ...(scope ? [PI_ORIGIN] : []));
+      }
     }
     const status = {
       scanned,
@@ -572,7 +575,9 @@ class Store {
       diagnostics,
       errors,
       lastScan: new Date().toISOString(),
-      sourceExists: fs.existsSync(path.join(home, "sessions")),
+      sourceExists: fs.existsSync(path.join(home, "sessions")) || !!(piSessions && fs.existsSync(piSessions)),
+      piSourceExists: !!(piSessions && fs.existsSync(piSessions)),
+      piFiles: this.piFiles.size,
     };
     this.set("scan", status);
     if (this.replayingRecovered && !errors) this.set("replayRecovered",false);
@@ -593,7 +598,10 @@ class Store {
         clearedAt: new Date().toISOString(),
       });
       this.db.exec("COMMIT");
-      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
+      // checkpoint() reuses the same TRUNCATE and adds the corruption-recovery
+      // REINDEX path that a bare PRAGMA beside VACUUM would skip.
+      this.checkpoint();
+      this.db.exec("VACUUM;");
     } catch (e) {
       try {
         this.db.exec("ROLLBACK");
@@ -617,4 +625,4 @@ class Store {
     try { this.checkpoint(); } finally { this.db.close(); }
   }
 }
-module.exports = { Store, hash };
+module.exports = { Store, UNASSIGNED_PROJECT };

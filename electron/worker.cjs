@@ -1,4 +1,4 @@
-const { readAccount, saveAccount, assignUnknown, UNKNOWN } = require("./accounts.cjs");
+const { readAccount, saveAccount, UNKNOWN } = require("./accounts.cjs");
 const { parentPort, workerData } = require("node:worker_threads");
 const { openStore } = require("./recovery.cjs");
 const { summarize, csv, exportRows } = require("./metrics.cjs");
@@ -26,7 +26,7 @@ async function scan(full = false) {
   let settle;
   scanDone = new Promise((resolve) => { settle = resolve; });
   try {
-    const status = await store.scan(workerData.home, (p) => emit("progress", p), {full});
+    const status = await store.scan(workerData.home, (p) => emit("progress", p), {full, piSessions: workerData.piSessions, piHome: workerData.piHome});
     if(status.changed || status.errors || status.full) emit("updated", null);
     if(status.errors) emit('diagnostic',{code:'scan_records',count:status.errors,items:status.diagnostics});
   } catch {
@@ -44,7 +44,8 @@ function quota() {
   return quotaTask;
 }
 async function queryQuota() {
-  const before = readAccount(workerData.home)?.id || UNKNOWN;
+  const account = () => readAccount(workerData.home)?.id || UNKNOWN;
+  const before = account();
   try {
     const q = await readQuota({
       codexHome: workerData.home,
@@ -52,7 +53,7 @@ async function queryQuota() {
     });
     await waitForScan();
     if(shutting)return;
-    const after = readAccount(workerData.home)?.id || UNKNOWN;
+    const after = account();
     if (before !== after) { emit("updated", null); return; }
     const groups = q.result.rateLimitsByLimitId || {
       codex: q.result.rateLimits,
@@ -91,8 +92,11 @@ parentPort.on("message", (msg) => {
     }
     return;
   }
+  // Every scan entry (startup, the 3s timer, refresh's scan(true)) is queued behind
+  // the same `queue`, so a queued operation cannot overlap a scan and needs no extra
+  // wait. queryQuota is the one sizable reader outside the queue and keeps its own
+  // waitForScan() before write.
   queue = queue.then(async () => {
-    await waitForScan();
     try {
       let result;
       switch (msg.method) {
@@ -111,9 +115,6 @@ parentPort.on("message", (msg) => {
           break;
         case "account":
           result = saveAccount(store, msg.args);
-          break;
-        case "assignAccount":
-          result = assignUnknown(store, msg.args);
           break;
         case "settings":
           result = store.saveSettings(msg.args);

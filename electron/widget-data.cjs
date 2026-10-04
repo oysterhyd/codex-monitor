@@ -1,6 +1,7 @@
 // Lightweight, account-scoped desktop data. No dashboard/history payloads.
+const { UNKNOWN } = require('./accounts.cjs');
 function widgetSnapshot(store, now = Date.now()) {
-  const account = store.get('currentAccount') || 'unassigned';
+  const account = store.get('currentAccount') || UNKNOWN;
   const today = new Date(now); today.setHours(0, 0, 0, 0);
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
   const rows = store.sql('SELECT ts,input,cached,output FROM usage WHERE account=? AND ts>=? AND ts<=? ORDER BY ts')
@@ -27,6 +28,6 @@ function widgetSnapshot(store, now = Date.now()) {
     cacheRate: input ? cached / input : null, tps: output / 60, speed, timeline,
     quotas: quotas.filter(q => q.bucket === bucket), scan: store.peek('scan'),
     quotaStatus: quotaStatus?.account === account ? quotaStatus : null,
-    language: store.settings().language, sampledAt: new Date(now).toISOString() };
+    language: store.settings().language };
 }
 module.exports = { widgetSnapshot };

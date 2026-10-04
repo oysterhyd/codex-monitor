@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {ChartLine, ArrowUpRight, Coins, GearSix, Database, MagnifyingGlass, X} from "@phosphor-icons/react";
 import { tr, dateFormat, systemText } from "./i18n.mjs";
-import { compact, full, money, recordMoney, date, duration, shortPath, prefersReducedMotion, TICK_FORMATS } from "./format.mjs";
+import { compact, full, money, moneyLabel, recordMoney, date, duration, shortPath, prefersReducedMotion, TICK_FORMATS } from "./format.mjs";
 import {chartPaths} from "./chart-paths.mjs";
 export function Animated({ value, format = compact, emphasize = false }) {
   const [shown, setShown] = useState(value),
@@ -39,6 +39,9 @@ export function Animated({ value, format = compact, emphasize = false }) {
   if (!emphasize) return <>{format(shown)}</>;
   return <span key={pulse} className={pulse ? "value-changed" : undefined}>{format(shown)}</span>;
 }
+// The "fully unpriced ⇒ 未定价" test is one product rule shared by the rank table
+// and the breakdown tables, so the sort keys and cells cannot drift.
+const fullyUnpriced = (row) => row.unpriced === row.requests;
 export function Empty({ children }) {
   return (
     <div className="empty">
@@ -136,6 +139,11 @@ export const Chart = React.memo(function Chart({
   // 今日 quota history is often a single sample; a 2.5px dot on a 160px plot reads as a
   // stray mark, so a series too short to draw a slope gets a marker that is really visible.
   const dotRadius = points.length < 4 ? 4.5 : 2.5;
+  // One formatter for a sample's value: the aria valuetext and the caption must not
+  // drift apart, and the caption alone appends the unpriced annotation.
+  const shown = chosen || points[0];
+  const formatPoint = (p) =>
+    percent ? p[value].toFixed(1) + "%" : unit === 'USD' ? money(p[value]) : full(p[value]) + " tokens";
   return (
     <div className="chart-wrap">
       <div className="chart-plot">
@@ -170,7 +178,9 @@ export const Chart = React.memo(function Chart({
           />
         ))}
         {fractions.map((f,i) => <line key={f} className={i % 2 ? "chart-minor-tick" : ""} x1={44+f*836} x2={44+f*836} y1="22" y2="150" stroke="var(--border)" opacity=".35" vectorEffect="non-scaling-stroke" />)}
-        <g key={replayKey} className="chart-reveal">
+        {/* The whole svg remounts on replayKey, so the reveal group needs no key of
+            its own; the remount restarts the chart-reveal animation. */}
+        <g className="chart-reveal">
         <path
           d={area}
           fill={color}
@@ -229,7 +239,7 @@ export const Chart = React.memo(function Chart({
           aria-valuemin={0}
           aria-valuemax={points.length - 1}
           aria-valuenow={hoverIndex ?? 0}
-          aria-valuetext={`${(chosen || points[0]).name} · ${percent ? (chosen || points[0])[value].toFixed(1) + '%' : unit === 'USD' ? money((chosen || points[0])[value]) : full((chosen || points[0])[value]) + ' tokens'}`}
+          aria-valuetext={`${shown.name} · ${formatPoint(shown)}`}
           onFocus={() => setHover(0)}
           onBlur={() => setHover(null)}
           onKeyDown={event => {
@@ -253,17 +263,25 @@ export const Chart = React.memo(function Chart({
       </div>
       <div className="chart-caption">
         {chosen
-          ? `${chosen.name} · ${percent ? chosen[value].toFixed(1) + "%" : unit === 'USD' ? money(chosen[value]) + (chosen.unpriced ? ' + ' + tr('未定价') : '') : full(chosen[value]) + " tokens"}`
+          ? `${chosen.name} · ${percent ? chosen[value].toFixed(1) + "%" : unit === 'USD' ? moneyLabel(chosen[value], chosen.unpriced) : full(chosen[value]) + " tokens"}`
           : "\u00a0"}
       </div>
     </div>
   );
 });
+// The panel icon is picked once per render by the title's first matching theme word.
+function panelIcon(title) {
+  const lower = title.toLowerCase();
+  if (lower.includes(tr("价格").toLowerCase())) return <Coins size={21} />;
+  if (lower.includes(tr("外观").toLowerCase())) return <GearSix size={21} />;
+  if (lower.includes(tr("额度").toLowerCase()) || lower.includes(tr("来源").toLowerCase())) return <Database size={21} />;
+  return <ChartLine size={21} />;
+}
 export function Panel({ title, meta, children, className = "" }) {
   return (
     <section className={"panel " + className}>
       <div className="panel-head">
-        <h2><span className="panel-icon" aria-hidden="true">{title.toLowerCase().includes(tr("价格").toLowerCase()) ? <Coins size={21} /> : title.toLowerCase().includes(tr("外观").toLowerCase()) ? <GearSix size={21} /> : title.toLowerCase().includes(tr("额度").toLowerCase()) || title.toLowerCase().includes(tr("来源").toLowerCase()) ? <Database size={21} /> : <ChartLine size={21} />}</span>{title}</h2>
+        <h2><span className="panel-icon" aria-hidden="true">{panelIcon(title)}</span>{title}</h2>
         {meta && <div className="panel-meta">{meta}</div>}
       </div>
       {children}
@@ -357,9 +375,9 @@ export const Rank = React.memo(function Rank({ rows, type, onSelect, lang }) {
           <div className="rank-meta">
             <span>{r.requests}{tr("次用量记录")}</span>
             <span>
-              {r.unpriced === r.requests
+              {fullyUnpriced(r)
                 ? tr("未定价")
-                : money(r.cost) + (r.unpriced ? tr(" + 未定价") : "")}
+                : moneyLabel(r.cost, r.unpriced)}
             </span>
           </div>
         </button>
@@ -370,6 +388,17 @@ export const Rank = React.memo(function Rank({ rows, type, onSelect, lang }) {
   );
 });
 
+// Shared pagination footer: Breakdown hides it outright below one page, while
+// RunRecords keeps the (always rendered) bar but disables both ends at page one.
+function Pagination({ page, pages, setPage }) {
+  return (
+    <div className="pagination">
+      <button className="button" disabled={page <= 1} onClick={() => setPage(page - 1)}>{tr("上一页")}</button>
+      <span aria-live="polite">{tr("第 {0} / {1} 页 · 每页 50 条", page, pages)}</span>
+      <button className="button" disabled={page >= pages} onClick={() => setPage(page + 1)}>{tr("下一页")}</button>
+    </div>
+  );
+}
 // Both tables are memoised units: any unrelated App state change (busy, toast, an
 // expanded record, a widget toggle) used to re-render every row. `lang` is part of the
 // props because tr()/date() read module state, so a language switch must invalidate.
@@ -381,7 +410,7 @@ export const Breakdown = React.memo(function Breakdown({ rows, view, setView, ch
   useEffect(() => setPage(1), [query, sort]);
   const matching = useMemo(() => rows.filter(row => `${row.name} ${row.project || ''}`.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => {
     if (sort === 'name') return a.name.localeCompare(b.name);
-    if (sort === 'cost') return (b.unpriced === b.requests ? -1 : b.cost) - (a.unpriced === a.requests ? -1 : a.cost) || a.name.localeCompare(b.name);
+    if (sort === 'cost') return (fullyUnpriced(b) ? -1 : b.cost) - (fullyUnpriced(a) ? -1 : a.cost) || a.name.localeCompare(b.name);
     return b[sort] - a[sort];
   }), [rows, query, sort]);
   const pages = Math.max(1, Math.ceil(matching.length / BREAKDOWN_PAGE_SIZE));
@@ -447,7 +476,7 @@ export const Breakdown = React.memo(function Breakdown({ rows, view, setView, ch
                 <td>{full(r.cached)}</td>
                 <td>{full(r.output)}</td>
                 <td>
-                  {r.unpriced === r.requests ? tr("未定价") : money(r.cost)}
+                  {fullyUnpriced(r) ? tr("未定价") : money(r.cost)}
                   {r.unpriced > 0 && r.unpriced < r.requests && (
                     <small>{tr("部分未定价")}</small>
                   )}
@@ -458,13 +487,7 @@ export const Breakdown = React.memo(function Breakdown({ rows, view, setView, ch
         </table>
         {!matching.length && <Empty>{query ? tr('没有匹配的结果') : tr('这个时间范围内还没有记录')}</Empty>}
       </div>
-      {pages > 1 && (
-        <div className="pagination">
-          <button className="button" disabled={current <= 1} onClick={() => setPage(current - 1)}>{tr("上一页")}</button>
-          <span aria-live="polite">{tr("第 {0} / {1} 页 · 每页 50 条", current, pages)}</span>
-          <button className="button" disabled={current >= pages} onClick={() => setPage(current + 1)}>{tr("下一页")}</button>
-        </div>
-      )}
+      {pages > 1 && <Pagination page={current} pages={pages} setPage={setPage} />}
     </>
   );
 });
@@ -528,11 +551,13 @@ export const RunRecords = React.memo(function RunRecords({ turns, records, expan
         </table>
         {!turns.length && <Empty>{tr('没有符合筛选条件的任务')}</Empty>}
       </div>
-      <div className="pagination">
-        <button className="button" disabled={!records || records.page<=1} onClick={()=>{setRecordPage(records.page-1);setExpanded(null);}}>{tr("上一页")}</button>
-        <span aria-live="polite">{tr("第 {0} / {1} 页 · 每页 50 条", records?.page || 1, records?.pages || 1)}</span>
-        <button className="button" disabled={!records || records.page>=records.pages} onClick={()=>{setRecordPage(records.page+1);setExpanded(null);}}>{tr("下一页")}</button>
-      </div>
+      {/* RunRecords has always kept its bar visible even on a single page; only
+          Breakdown hides it below one page at its call site. */}
+      <Pagination
+        page={records?.page || 1}
+        pages={records?.pages || 1}
+        setPage={(p) => { setRecordPage(p); setExpanded(null); }}
+      />
     </>
   );
 });

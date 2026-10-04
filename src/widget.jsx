@@ -1,17 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Target, Stack, Lightning, Coins, Cube, Clock, ArrowClockwise, DotsThree, ArrowUpRight } from '@phosphor-icons/react';
 import icon from '../assets/monitor-glass.png';
+import { compact } from './format.mjs';
 import { createRefresh } from './refresh.mjs';
 import './widget.css';
 
-// Built once: the widget re-renders every 3s and each card formats several values.
-const compactFormat = Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 });
+// The widget renders inside the same bundle as the dashboard, so the compact
+// formatter is shared with format.mjs. Only the stamp formats stay local: the
+// widget is always one of two fixed locales, and clockFormat's en-GB order is
+// deliberate for the 24h tick strip.
 const clockFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
 const stampFormats = {
   'en-GB': new Intl.DateTimeFormat('en-GB', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }),
   'zh-CN': new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }),
 };
-const compact = n => n == null ? '—' : compactFormat.format(n);
 const percent = n => n == null ? '—' : `${Number(n.toFixed(1))}%`;
 
 function Sparkline({ points = [], large = false, english }) {

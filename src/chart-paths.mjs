@@ -17,7 +17,8 @@ export function chartPaths(points, xy, { step = false, baseline = 150, smooth = 
       const segment = segments.at(-1);
       const [px, py] = xy[i-1];
       const dx = (x-px)/3;
-      segment.line += smooth ? ` C${px+dx},${py} ${x-dx},${y} ${x},${y}` : step ? ` H${x} V${y}` : ` L${x},${y}`;
+      // Presentation mode can add reset guides, but must never smooth quota observations.
+      segment.line += step ? ` H${x} V${y}` : smooth ? ` C${px+dx},${py} ${x-dx},${y} ${x},${y}` : ` L${x},${y}`;
       segment.last = x;
     }
   }

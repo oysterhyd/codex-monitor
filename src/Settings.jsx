@@ -24,19 +24,37 @@ function AccountName({ account, current, act, busy }) {
   </form>;
 }
 
+const EMPTY_PRICE = {
+  model: "",
+  input: "",
+  cached: "",
+  output: "",
+  cache_write: "0",
+  effective: "1970-01-01T00:00",
+};
+// A store ISO stamp → the <input type="datetime-local"> value (local, minute precision).
+const toLocalInput = (iso) => {
+  const d = new Date(iso);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+};
+
 export function Settings({ data, act, busy, initialSection = "general" }) {
   const [section, setSection] = useState(initialSection);
   useEffect(() => setSection(initialSection), [initialSection]);
-  const [price, setPrice] = useState({
-    model: "",
-    input: "",
-    cached: "",
-    output: "",
-    cache_write: "0",
-    effective: "1970-01-01T00:00",
-  });
+  const [price, setPrice] = useState(EMPTY_PRICE);
   const [editingPriceId, setEditingPriceId] = useState(null);
   const set = (k, v) => setPrice((p) => ({ ...p, [k]: v }));
+  // A price row → the editable form shape (numeric fields as-is, effective converted
+  // to the datetime-local value); callers override `effective` for "use as template".
+  const setPriceShape = (p) => ({
+    model: p.model,
+    input: p.input,
+    cached: p.cached,
+    output: p.output,
+    cache_write: p.cache_write,
+    effective: toLocalInput(p.effective),
+  });
   return (
     <div className={`settings-layout settings-${section}`}>
       <div className="settings-tabs" role="group" aria-label={tr("设置分类")}>{[["general",tr("通用")],["accounts",tr("账号")],["prices",tr("模型价格")],["data",tr("数据与存储")]].map(([key,label]) => <button className={section === key ? "active" : ""} aria-pressed={section === key} key={key} onClick={() => setSection(key)}>{label}</button>)}</div>
@@ -128,6 +146,11 @@ export function Settings({ data, act, busy, initialSection = "general" }) {
           <code>{data.paths.home}</code>
         </div>
         <div className="path-row">
+          <span>{tr("pi 会话目录")}</span>
+          <code>{data.paths.piSessions || "—"}</code>
+        </div>
+        <p className="panel-note">{tr("自动统计 pi 中官方登录的 Codex 用量，不含 API Key 和其他供应商。历史账号无法确认时保留为未归属，不改变额度查询来源。")}</p>
+        <div className="path-row">
           <span>{tr("监测数据库目录")}</span>
           <code>{data.paths.data}</code>
         </div>
@@ -176,7 +199,7 @@ export function Settings({ data, act, busy, initialSection = "general" }) {
                   effective: new Date(price.effective).toISOString(),
                 });
                 setEditingPriceId(null);
-                setPrice({ model: "", input: "", cached: "", output: "", cache_write: "0", effective: "1970-01-01T00:00" });
+                setPrice(EMPTY_PRICE);
                 return result;
               },
               tr(id === null ? "价格版本已保存" : "价格版本已更新"),
@@ -228,7 +251,7 @@ export function Settings({ data, act, busy, initialSection = "general" }) {
             <button className="button primary" type="submit" disabled={busy}>
               {editingPriceId === null ? tr("保存价格版本") : tr("保存修改")}
             </button>
-            {editingPriceId !== null && <button className="button" type="button" disabled={busy} onClick={() => { setEditingPriceId(null); setPrice({ model: "", input: "", cached: "", output: "", cache_write: "0", effective: "1970-01-01T00:00" }); }}>{tr("取消编辑")}</button>}
+            {editingPriceId !== null && <button className="button" type="button" disabled={busy} onClick={() => { setEditingPriceId(null); setPrice(EMPTY_PRICE); }}>{tr("取消编辑")}</button>}
           </div>
         </form>
         <div className="table-scroll">
@@ -254,15 +277,9 @@ export function Settings({ data, act, busy, initialSection = "general" }) {
                         className="table-link"
                         onClick={() => {
                           setEditingPriceId(null);
-                          setPrice({
-                            model: p.model,
-                            input: p.input,
-                            cached: p.cached,
-                            output: p.output,
-                            cache_write: p.cache_write,
-                            effective:
-                              new Date().toLocaleDateString("en-CA") + "T00:00",
-                          });
+                          // "Use as template" keeps the row's rates but today's date:
+                          // the new version starts effective now, not at the original's date.
+                          setPrice({...setPriceShape(p), effective: new Date().toLocaleDateString("en-CA") + "T00:00"});
                         }}
                       >
                         {p.model}{" "}
@@ -285,22 +302,13 @@ export function Settings({ data, act, busy, initialSection = "general" }) {
                         <div className="price-actions">
                           <button className="button" type="button" disabled={busy} onClick={() => {
                             setEditingPriceId(p.id);
-                            const effective = new Date(p.effective);
-                            effective.setMinutes(effective.getMinutes() - effective.getTimezoneOffset());
-                            setPrice({
-                              model: p.model,
-                              input: p.input,
-                              cached: p.cached,
-                              output: p.output,
-                              cache_write: p.cache_write,
-                              effective: effective.toISOString().slice(0, 16),
-                            });
+                            setPrice(setPriceShape(p));
                           }}>{tr("编辑")}</button>
                           <button className="button danger" type="button" disabled={busy} onClick={() => act(async () => {
                             const result = await api.deletePrice({ id: p.id, model: p.model });
                             if (result && editingPriceId === p.id) {
                               setEditingPriceId(null);
-                              setPrice({ model: "", input: "", cached: "", output: "", cache_write: "0", effective: "1970-01-01T00:00" });
+                              setPrice(EMPTY_PRICE);
                             }
                             return result;
                           }, tr("价格版本已删除"))}>{tr("删除")}</button>
@@ -318,7 +326,7 @@ export function Settings({ data, act, busy, initialSection = "general" }) {
         <div className="setting-row">
           <div>
             <b>{tr("清空监测历史")}</b>
-            <small>{tr("只删除本应用统计；Codex 原始记录、价格和设置保留。之后仅采集新增记录。")}</small>
+            <small>{tr("只删除本应用统计；Codex 与 pi 原始记录、价格和设置保留。之后仅采集新增记录。")}</small>
           </div>
           <button
             className="button danger"

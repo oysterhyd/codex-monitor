@@ -7,10 +7,20 @@ const CARD_W = 560, CARD_H = 380;
 // inside the fixed 560x380 window. The glass shares that right edge when expanded.
 const ORB = { l: CARD_W - 132, r: CARD_W - 12, t: 12, b: 132 };
 
+function readState(data) {
+  try { return JSON.parse(fs.readFileSync(path.join(data, 'widget-window.json'), 'utf8')); } catch { return {}; }
+}
+
+// The persisted state file belongs to this module; both bootstraps — main.cjs's
+// widgetMode check before any window exists and createWidget's full state — go
+// through it, so the mode key has a single owner.
+function savedWidgetMode(data) {
+  return readState(data).mode === true;
+}
+
 function createWidget({ data, restore, refresh }) {
   const file = path.join(data, 'widget-window.json');
-  let saved = {};
-  try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  let saved = readState(data);
   // Legacy profiles carry topmost:false inherited from the old pinned:false
   // default, so the widget silently stopped floating. Adopt on-top once and
   // record the choice; later menu toggles (topmostChoice) are respected.
@@ -40,9 +50,12 @@ function createWidget({ data, restore, refresh }) {
     saved = { ...window.getBounds(), topmost: window.isAlwaysOnTop(), topmostChoice: true, mode: saved.mode === true };
     try { fs.writeFileSync(file, JSON.stringify(saved)); } catch {}
   };
+  // Every placement call pins the fixed design size together with the position:
+  // Windows re-rounds transparent-window bounds on every SetWindowPos, so moving
+  // or showing without re-stamping width/height lets the size ratchet.
+  const placeAt = ({ x, y }) => window.setBounds({ x, y, width: CARD_W, height: CARD_H });
   const enter = () => {
-    const p = position();
-    window.setBounds({ ...p, width: CARD_W, height: CARD_H });
+    placeAt(position());
     window.showInactive();
     window.setSkipTaskbar(false);
     window.webContents.send('widget:enter');
@@ -71,7 +84,7 @@ function createWidget({ data, restore, refresh }) {
     const [w, h] = window.getSize();
     if ((w !== CARD_W || h !== CARD_H) && !drag) window.setSize(CARD_W, CARD_H);
   });
-  const reposition = () => { if (window.isVisible()) window.setBounds({ ...position(), width: CARD_W, height: CARD_H }); };
+  const reposition = () => { if (window.isVisible()) placeAt(position()); };
   screen.on('display-removed', reposition);
   screen.on('display-metrics-changed', reposition);
   window.on('closed', () => { screen.removeListener('display-removed', reposition); screen.removeListener('display-metrics-changed', reposition); });
@@ -98,9 +111,7 @@ function createWidget({ data, restore, refresh }) {
         const y = Math.round(bounds.y + payload.clientY - drag.cy);
         const area = screen.getDisplayNearestPoint({ x, y }).workArea;
         const c = clampOrb(x, y, area);
-        // Move and pin the size together: Windows re-rounds transparent-window
-        // bounds on every SetWindowPos, which would otherwise ratchet the width.
-        window.setBounds({ x: c.x, y: c.y, width: CARD_W, height: CARD_H });
+        placeAt(c);
       }
     }
     const moved = drag.moved;
@@ -113,7 +124,7 @@ function createWidget({ data, restore, refresh }) {
     const area = screen.getDisplayMatching(bounds).workArea;
     const x = Math.round(Math.max(area.x, Math.min(bounds.x, area.x + area.width - CARD_W)));
     const y = Math.round(Math.max(area.y, Math.min(bounds.y, area.y + area.height - CARD_H)));
-    if (x !== bounds.x || y !== bounds.y) window.setBounds({ x, y, width: CARD_W, height: CARD_H });
+    if (x !== bounds.x || y !== bounds.y) placeAt({ x, y });
   }, menu() {
     Menu.buildFromTemplate([
       { label: '打开主窗口 / Open monitor', click: restore },
@@ -124,4 +135,4 @@ function createWidget({ data, restore, refresh }) {
     ]).popup({ window });
   } };
 }
-module.exports = { createWidget };
+module.exports = { createWidget, savedWidgetMode };

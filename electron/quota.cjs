@@ -5,7 +5,8 @@ const { promisify } = require("node:util");
 const activeChildren = new Set();
 // Resolution can fall back to a PowerShell AppX query (measured ~1.5 s on a machine
 // whose Codex came from the Store) and is re-run on every quota interval. Cache the
-// answer, and only trust the cache while the caller's override is unchanged.
+// successful answer, and only trust the cache while the caller's override is unchanged.
+// Do not cache failures indefinitely: installation/repair must recover on a later poll.
 let resolvedCodex = null;
 let resolvedOverride = null;
 
@@ -33,8 +34,13 @@ async function findCodex(override) {
       return false;
     }
   };
-  let foundCandidate = false;
   // A stale or incompatible standalone install must not prevent trying the Store app.
+  let foundCandidate = false;
+  const probe = async (file) => {
+    if (!fs.existsSync(file)) return;
+    foundCandidate = true;
+    if (await runVersion(file)) return (resolvedCodex = file);
+  };
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     const file = path.join(
       dir,
@@ -49,9 +55,7 @@ async function findCodex(override) {
       "bin",
       "codex.exe",
     );
-    if (!fs.existsSync(file)) continue;
-    foundCandidate = true;
-    if (await runVersion(file)) return (resolvedCodex = file);
+    if (await probe(file)) return resolvedCodex;
   }
   try {
     const { stdout } = await promisify(execFile)(
@@ -71,19 +75,13 @@ async function findCodex(override) {
       { windowsHide: true, timeout: 10000 },
     );
     for (const dir of stdout.trim().split(/\r?\n/).reverse()) {
-      const file = path.join(dir.trim(), "app", "resources", "codex.exe");
-      if (!fs.existsSync(file)) continue;
-      foundCandidate = true;
-      if (await runVersion(file)) return (resolvedCodex = file);
+      if (await probe(path.join(dir.trim(), "app", "resources", "codex.exe"))) return resolvedCodex;
     }
   } catch {}
-  if (foundCandidate)
-    throw new Error(
-      "检测到 Codex，但无法启动 App Server；请在设置中选择有效的 codex.exe",
-    );
-  throw new Error(
-    "未找到 Codex App Server，请在设置中选择桌面端随附的 codex.exe",
-  );
+  const discoveryError = foundCandidate
+    ? new Error("检测到 Codex，但无法启动 App Server；请在设置中选择有效的 codex.exe")
+    : new Error("未找到 Codex App Server，请在设置中选择桌面端随附的 codex.exe");
+  throw discoveryError;
 }
 
 function describeQuotaError(error) {

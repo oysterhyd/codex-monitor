@@ -5,16 +5,20 @@ import {shortPath} from './format.mjs';
 import {localDay} from './activity-calendar.mjs';
 
 export function FilterBar({data, filter, setFilter, page, onAccount}) {
-  const [customOpen, setCustomOpen] = useState(false), [draft, setDraft] = useState({start: filter.start || localDay(), end: filter.end || localDay()});
-  useEffect(() => {setCustomOpen(filter.range === 'custom'); setDraft({start: filter.start || localDay(), end: filter.end || localDay()});}, [filter.range, filter.start, filter.end]);
+  const freshDraft = () => ({start: filter.start || localDay(), end: filter.end || localDay()});
+  const [customOpen, setCustomOpen] = useState(false), [draft, setDraft] = useState(freshDraft);
+  useEffect(() => {setCustomOpen(filter.range === 'custom'); setDraft(freshDraft());}, [filter.range, filter.start, filter.end]);
   const choose = (key, value) => setFilter(previous => ({...previous, [key]: value}));
   const label = id => data.accounts?.find(account => account.id === id)?.label || tr('未归属');
   const active = ['model', 'project', 'session'].filter(key => filter[key]);
+  // The custom picker overlays whatever range is active, so the segmented control's
+  // lens position and pressed state resolve through one value.
+  const effectiveRange = customOpen ? 'custom' : filter.range;
   return <div className="filter-area">
     <div className="filters">
-      {page !== 'activity' && <div className="segmented range-selector" role="group" aria-label={tr('时间范围')} style={{'--active-index': ['today','7d','30d','all','custom'].indexOf(customOpen ? 'custom' : filter.range)}}>
+      {page !== 'activity' && <div className="segmented range-selector" role="group" aria-label={tr('时间范围')} style={{'--active-index': ['today','7d','30d','all','custom'].indexOf(effectiveRange)}}>
         <span className="range-lens" aria-hidden="true"/>
-        {[['today',tr('今日')],['7d',tr('近 7 天')],['30d',tr('近 30 天')],['all',tr('全部')],['custom',tr('自定义')]].map(([id, text]) => <button key={id} aria-pressed={(customOpen ? 'custom' : filter.range) === id} className={(customOpen ? 'custom' : filter.range) === id ? 'active' : ''} onClick={() => {if (id === 'custom') setCustomOpen(true); else {setCustomOpen(false); choose('range', id);}}}>{text}</button>)}
+        {[['today',tr('今日')],['7d',tr('近 7 天')],['30d',tr('近 30 天')],['all',tr('全部')],['custom',tr('自定义')]].map(([id, text]) => <button key={id} aria-pressed={effectiveRange === id} className={effectiveRange === id ? 'active' : ''} onClick={() => {if (id === 'custom') setCustomOpen(true); else {setCustomOpen(false); choose('range', id);}}}>{text}</button>)}
       </div>}
       {page === 'activity' && <span className="filter-label"><FunnelSimple size={16}/>{tr('活动筛选')}</span>}
       <div className="account-control"><select aria-label={tr('账号筛选')} value={filter.account || ''} onChange={event => {choose('account', event.target.value); onAccount?.();}}>
