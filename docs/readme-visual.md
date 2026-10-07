@@ -5,10 +5,10 @@ README 使用三个本地资源，提交源码时一同提交 `assets/readme/`�
 | 文件 | 来源 |
 | --- | --- |
 | `assets/readme/overview.png` | 当前 MyGO 主窗口的原生界面截图 |
-| `assets/readme/widget.png` | 当前透明桌面小窗口截图 |
+| `assets/readme/widget.png` | Go / Win32 原生透明桌面小窗口截图 |
 | `assets/readme/cover.png` | 基于上述两张截图，通过内置 `image_gen` 合成的展示封面 |
 
-两张原始截图来自当前版本的界面验收，使用合成演示数据。封面用于展示，真实界面以 README 中的原始截图为准；不包含个人账号或真实项目路径。
+两张原始截图来自 `npm run native:check` 的原生界面验收，使用合成演示数据。小窗口输出为 `artifacts/native-acceptance/widget-card.png`。封面基于此前相同布局的截图制作，用于展示；真实界面以 README 中的原始截图为准。不包含个人账号或真实项目路径。
 
 生成提示词：
 

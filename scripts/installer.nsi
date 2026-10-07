@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 Unicode true
 RequestExecutionLevel user
-SetCompressor /SOLID zlib
+SetCompressor /SOLID lzma
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "x64.nsh"
@@ -92,12 +92,15 @@ Section "Codex Monitor"
   ClearErrors
   File "/oname=${APP_EXE}" "${BUNDLE_DIR}\Codex Monitor Native.exe"
   File "${BUNDLE_DIR}\icon.ico"
-  File /r "${BUNDLE_DIR}\widget"
   IfErrors install_error
   ; Only remove known legacy program files; never touch the user profile.
   IfFileExists "$INSTDIR\Codex Monitor.exe" 0 legacy_done
   !include "${LEGACY_MANIFEST}"
   legacy_done:
+  ; Remove only files the prior native installer shipped for its Electron widget.
+  IfFileExists "$INSTDIR\widget\runtime\electron.exe" 0 widget_legacy_done
+  !include "${LEGACY_WIDGET_MANIFEST}"
+  widget_legacy_done:
   ClearErrors
   WriteUninstaller "$INSTDIR\Uninstall ${APP_NAME}.exe"
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\icon.ico"

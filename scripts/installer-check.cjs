@@ -50,11 +50,16 @@ try {
   fs.writeFileSync(path.join(destination, 'Uninstall Codex Monitor.exe'), 'legacy uninstaller');
   fs.writeFileSync(path.join(destination, 'resources', 'app.asar'), 'legacy app source');
   fs.writeFileSync(path.join(destination, 'resources', 'keep-user-file.txt'), 'must survive legacy cleanup');
+  fs.mkdirSync(path.join(destination, 'widget', 'runtime'), { recursive: true });
+  fs.writeFileSync(path.join(destination, 'widget', 'runtime', 'electron.exe'), 'legacy widget runtime');
+  fs.writeFileSync(path.join(destination, 'widget', 'keep-user-file.txt'), 'must survive widget cleanup');
   runInstaller(candidate, ['/S', `/D=${destination}`]);
   installed = true;
   const count = validateFiles();
   assert.ok(!fs.existsSync(path.join(destination, 'Codex Monitor.exe')), 'Legacy main executable retained');
   assert.ok(!fs.existsSync(path.join(destination, 'resources', 'app.asar')), 'Legacy app archive retained');
+  assert.ok(!fs.existsSync(path.join(destination, 'widget', 'runtime', 'electron.exe')), 'Legacy widget runtime retained');
+  assert.ok(fs.existsSync(path.join(destination, 'widget', 'keep-user-file.txt')), 'Widget user file lost');
   const registration = JSON.parse(powershell(`Get-ItemProperty -LiteralPath ${quote(registry)} | Select-Object DisplayVersion,InstallLocation,UninstallString | ConvertTo-Json -Compress`));
   assert.equal(registration.DisplayVersion, version);
   assert.equal(registration.InstallLocation, destination);
@@ -103,6 +108,7 @@ try {
   }
   assert.ok(fs.existsSync(path.join(destination, 'keep-user-file.txt')));
   assert.ok(fs.existsSync(path.join(destination, 'resources', 'keep-user-file.txt')));
+  assert.ok(fs.existsSync(path.join(destination, 'widget', 'keep-user-file.txt')));
   assert.equal(powershell(`Test-Path -LiteralPath ${quote(registry)}`).trim(), 'False');
   assert.equal(powershell(`$key = Get-Item -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'; [bool]$key.GetValue(${quote(name)}, $null)`).trim(), 'False');
   for (const directory of Object.values(shortcutPaths)) assert.ok(!fs.existsSync(path.join(directory, `${name}.lnk`)));

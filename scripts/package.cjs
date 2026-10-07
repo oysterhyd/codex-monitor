@@ -53,9 +53,10 @@ function compile(options = {}) {
   if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Package on Windows x64.');
   const compiler = compilerPath();
   const sourceFiles = files(bundle);
-  for (const required of ['Codex Monitor Native.exe', 'icon.ico', path.join('widget', 'runtime', 'electron.exe'), path.join('widget', 'dist', 'index.html')]) {
+  for (const required of ['Codex Monitor Native.exe', 'icon.ico']) {
     if (!sourceFiles.includes(required)) throw new Error(`Incomplete native bundle: ${required}`);
   }
+  if (sourceFiles.length !== 2) throw new Error('Unexpected files in the native-only bundle.');
   const output = options.output || installer;
   const manifests = path.join(root, 'artifacts', 'nsis');
   fs.mkdirSync(manifests, { recursive: true });
@@ -68,16 +69,7 @@ function compile(options = {}) {
   });
   lines.push(...[...directories].sort((a, b) => b.length - a.length).map(directory => `RMDir "$INSTDIR\\${nsisPath(directory)}"`));
   fs.writeFileSync(uninstallManifest, '\uFEFF' + lines.join('\n') + '\n');
-  const legacyManifest = path.join(manifests, 'legacy-files.nsh');
-  const legacyFiles = files(path.join(bundle, 'widget', 'runtime')).filter(file => !file.startsWith(`resources${path.sep}`));
-  fs.writeFileSync(legacyManifest, '\uFEFF' + [
-    ...legacyFiles.map(file => `Delete "$INSTDIR\\${nsisPath(file)}"`),
-    'Delete "$INSTDIR\\resources\\app.asar"',
-    'Delete "$INSTDIR\\Codex Monitor.exe"',
-    'Delete "$INSTDIR\\Uninstall Codex Monitor.exe"',
-    'RMDir "$INSTDIR\\resources"',
-    'RMDir "$INSTDIR\\locales"',
-  ].join('\n') + '\n');
+  const legacyManifest = path.join(__dirname, 'legacy-app-files.nsh');
   const definitions = {
     APP_NAME: options.name || 'Codex Monitor',
     APP_EXE: options.exe || 'Codex Monitor Native.exe',
@@ -90,6 +82,7 @@ function compile(options = {}) {
     PROCESS_PLUGIN_DIR: pluginPath(compiler),
     UNINSTALL_MANIFEST: uninstallManifest,
     LEGACY_MANIFEST: legacyManifest,
+    LEGACY_WIDGET_MANIFEST: path.join(__dirname, 'legacy-widget-files.nsh'),
   };
   const args = ['/V2', '/INPUTCHARSET', 'UTF8', ...Object.entries(definitions).map(([key, value]) => `/D${key}=${nsisPath(String(value))}`), path.join(__dirname, 'installer.nsi')];
   const result = spawnSync(compiler, args, { cwd: root, stdio: 'inherit', windowsHide: true });

@@ -11,7 +11,6 @@ import (
 	"local.codex.monitor/internal/monitor"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -19,7 +18,7 @@ import (
 )
 
 type Options struct {
-	Data, Home, Root, Capture, Snapshot string
+	Data, Home, Capture, Snapshot       string
 	Offline, Hidden, Smoke, SmokeWidget bool
 	RepairDatabase                      bool
 	Stdio                               bool
@@ -81,13 +80,12 @@ func Run(resources fs.FS) error {
 	o := Options{}
 	flag.StringVar(&o.Data, "data", os.Getenv("MONITOR_TEST_DATA"), "monitor profile directory")
 	flag.StringVar(&o.Home, "home", os.Getenv("MONITOR_CODEX_HOME"), "Codex data directory")
-	flag.StringVar(&o.Root, "root", "", "source project for retained widget")
 	flag.StringVar(&o.Capture, "capture-dir", "", "save native-window captures")
 	flag.StringVar(&o.Snapshot, "snapshot", "", "print a snapshot for a JSON filter and exit")
 	flag.BoolVar(&o.Offline, "offline", false, "disable source scans and quota queries")
 	flag.BoolVar(&o.Hidden, "hidden", false, "start in tray")
 	flag.BoolVar(&o.Smoke, "smoke", false, "capture all native pages and exit")
-	flag.BoolVar(&o.SmokeWidget, "smoke-widget", false, "verify retained widget transport")
+	flag.BoolVar(&o.SmokeWidget, "smoke-widget", false, "verify native transparent widget")
 	flag.BoolVar(&o.Stdio, "stdio", false, "run the Go data service over private stdio")
 	flag.BoolVar(&o.RepairDatabase, "repair-database", false, "back up and repair monitor database, then exit")
 	flag.Parse()
@@ -111,6 +109,9 @@ func Run(resources fs.FS) error {
 	}
 	if o.Snapshot == "" && !o.Stdio {
 		mygo.App.SetName("Codex Monitor Native")
+		if o.Smoke {
+			mygo.App.SetName("Codex Monitor Native Acceptance")
+		}
 		mygo.App.SetPath(mygo.PathUserData, filepath.Join(o.Data, "native-shell"))
 		if !mygo.App.RequestSingleInstanceLock() {
 			return nil
@@ -134,7 +135,7 @@ func Run(resources fs.FS) error {
 	if o.Offline || (os.Getenv("MONITOR_TEST_DATA") != "" && os.Getenv("MONITOR_PI_HOME") == "") {
 		piHome, piSessions = "", ""
 	}
-	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, Offline: o.Offline, Version: "2.5.1"})
+	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, Offline: o.Offline, Version: "2.6.0"})
 	if err != nil {
 		if o.Snapshot == "" && !o.Stdio {
 			mygo.App.WhenReady(func() {
@@ -571,9 +572,12 @@ func (a *App) smoke() {
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
+		if verified {
+			a.verifyNativeWidget()
+		}
 		a.updateWait(func() {
 			if !verified {
-				a.errorText = "小组件数据桥接验收失败"
+				a.errorText = "原生小窗口数据读取验收失败"
 			}
 			a.restore()
 		})
@@ -584,8 +588,4 @@ func (a *App) smoke() {
 		a.quitting = true
 		mygo.App.Quit()
 	})
-}
-func executableRoot() string {
-	exe, _ := os.Executable()
-	return strings.TrimSuffix(filepath.Dir(exe), string(filepath.Separator))
 }

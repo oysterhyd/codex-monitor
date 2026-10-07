@@ -1,31 +1,21 @@
 {
   "name": "codex-monitor",
-  "version": "2.5.1",
-  "description": "Local Windows Codex desktop usage monitor",
+  "version": "2.6.0",
+  "description": "Native Go Windows Codex desktop usage monitor",
   "private": true,
   "author": "Codex Monitor",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "node scripts/native.cjs start",
     "start": "node scripts/native.cjs start",
     "build": "node scripts/native.cjs build",
     "package": "node scripts/package.cjs",
     "package:check": "node scripts/installer-check.cjs",
-    "widget:build": "vite build",
-    "widget:check": "npm run widget:build && node scripts/widget-check.cjs",
-    "test": "node scripts/native.cjs test && node --test tests/*.test.cjs",
-    "test:ui": "npm run native:check && npm run widget:check",
+    "test": "node scripts/native.cjs test",
+    "test:ui": "npm run native:check",
     "native:start": "node scripts/native.cjs start",
     "native:build": "node scripts/native.cjs build",
     "native:test": "node scripts/native.cjs test",
-    "native:check": "node scripts/native-check.cjs"
-  },
-  "devDependencies": {
-    "@phosphor-icons/react": "^2.1.10",
-    "@vitejs/plugin-react": "^6.1.1",
-    "electron": "^44.2.0",
-    "playwright-core": "^1.63.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "vite": "^8.2.2"
+    "native:check": "node scripts/native-check.cjs",
+    "widget:check": "npm run native:check"
   }
 }

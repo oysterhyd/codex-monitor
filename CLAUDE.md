@@ -2,42 +2,39 @@
 
 ## Project
 
-Codex Monitor is a Windows x64 application with a MyGO native main window and Go data service. Electron/React is used only for the retained transparent desktop widget. UI copy defaults to Simplified Chinese and supports English.
+Codex Monitor is a Windows x64 application written in Go. MyGO renders the main window; Go/Win32 renders the transparent desktop card and token orb. Both share a single in-process data service. UI copy defaults to Simplified Chinese and supports English. There is no browser, Electron, React, Vite, npm dependency, or separate widget process.
 
 ## Commands
 
-Use PowerShell 7. Install Node dependencies with `npm ci`; Go 1.27.1 is required by go.mod. `scripts/go.cjs` resolves GO_EXE, the local Windows Go installation or PATH.
+Use PowerShell 7 and Go 1.27.1. `scripts/go.cjs` resolves GO_EXE, the local Windows Go installation or PATH. npm scripts require Node 22.19+ and use only its standard library.
 
-- `npm start`: build and launch the native app.
-- `npm run build`: produce the complete portable app under build/native.
-- `npm run package`: build the native NSIS installer and SHA-256 checksum under release; requires NSIS 3 and the Unicode nsProcess plugin (MAKENSIS / NSIS_PLUGIN_DIR or existing cache).
-- `npm run package:check`: isolated installer acceptance for file hashes, shortcuts, registry, the installed service, upgrades and uninstall; run after package.
-- `npm test`: Go tests plus the widget refresh test.
-- `npm run native:check`: isolated native-window acceptance, including five pages, motion, window controls and widget transport.
-- `npm run widget:check`: isolated real Electron widget acceptance, using the Go service.
-- `npm run test:ui`: both UI acceptance suites.
-- `npm run widget:build`: build only the widget renderer into dist.
-- `npm run dev`: widget renderer debugging; data requires the Electron bridge.
+- `go run .` / `npm start` / `npm run dev`: launch the native app.
+- `npm run build`: produce the executable and icon in build/native.
+- `go test ./...` / `npm test`: data, recovery, native UI and widget tests.
+- `npm run native:check`: synthetic native-window acceptance, including all five pages and the real Win32 widget.
+- `npm run widget:check` / `npm run test:ui`: aliases for the native acceptance suite.
+- `npm run package`: build the NSIS/LZMA installer and SHA-256 checksum; requires NSIS 3 and Unicode nsProcess (MAKENSIS / NSIS_PLUGIN_DIR or existing cache).
+- `npm run package:check`: isolated installer acceptance, including old runtime cleanup, file hashes, shortcuts, registry, installed service, database repair, running-app guard, upgrade and uninstall.
 
-Close the running monitor before replacing its executable. GUI close hides to tray; tray Exit fully stops it. Ship the entire build/native directory, including widget/runtime.
+Close the monitor from its tray before replacing an executable; GUI close hides to tray. Distribute build/native, which contains only Codex Monitor Native.exe and icon.ico. No runtime directory is needed.
 
 ## Architecture
 
-- main.go embeds icons and assets/locales JSON dictionaries and starts internal/nativeapp.
-- internal/nativeapp owns the MyGO pages, tray, window behavior, transitions and widget bridge.
-- internal/monitor owns SQLite, Codex/Pi parsing and scans, accounts, price versions, statistics, quotas and actions. A single serialized service owns the database.
-- electron/native-widget.cjs authenticates to the Go parent over a private loopback socket. widget-window.cjs owns placement, drag and widget-window.json. widget-preload.cjs exposes the narrow renderer bridge.
-- src contains only the React widget and its formatting/refresh helpers. The HTML entry always mounts the widget.
-- internal/testfixture and cmd/fixture generate synthetic acceptance profiles. UI tests also seed temporary profiles automatically; no personal corpus or old implementation is needed.
+- main.go embeds icons/locales and starts internal/nativeapp.
+- internal/nativeapp owns pages, tray, window behavior, transitions and export.
+- widget*.go owns widget layout, formatting, animation, refresh coalescing and per-pixel-alpha Win32 presentation. Its callbacks and model run on the GUI thread; asynchronous service results return through the GUI dispatcher. Keep memory-renderer/font caches across frames.
+- internal/monitor owns SQLite, source parsing/scans, accounts, prices, statistics, quotas and actions. One serialized service owns the database.
+- internal/testfixture and cmd/fixture generate temporary synthetic acceptance profiles. Never use personal data in test captures or release assets.
+- scripts/legacy-*-files.nsh contains only removal lists for upgrading prior installations, not any old runtime code.
 
-See docs/architecture.md for data contracts and maintenance rules. There is no Electron main dashboard, Node data worker, or legacy installer build.
+See docs/architecture.md for data contracts and maintenance rules.
 
 ## Invariants
 
-Do not write Codex/Pi source files or persist message bodies, tool calls, tokens or API keys. Keep unknown costs, cache rates and quotas distinguishable from zero. Deduplicate modern records by response id and use differences for legacy cumulative records. Keep account filters and widget scope consistent: widget usage covers all local accounts, while quota belongs to the current Codex account. Respect clear-history boundaries and preserve manual price versions.
+Do not write Codex/Pi source files or persist message bodies, tool calls, authentication tokens or API keys. Preserve unknown values, response-ID deduplication, clear-history boundaries, account attribution and manual price versions. Widget usage covers all local accounts while quota belongs to the current account. The widget never opens SQLite.
 
-Renderer sandbox, context isolation and sender validation must remain enabled. Do not broaden the widget preload API. The widget must never open SQLite. Quota charts are discrete step observations and break at resets/gaps. Preserve the fixed 560x380 widget bounds and its existing animation/drag behavior. Respect reduced motion in both interfaces.
+Preserve the fixed 560x380 DIP window, 536x356 card, 120x120 orb, CSS-equivalent timings/geometry, language and tooltip semantics, drag threshold, click suppression, transparent hit testing, keyboard focus, right-click menu, topmost choice, position and mode persistence. Respect reduced motion/transparency. Reassert fixed physical dimensions on every placement and DPI change. Release timers, pointer capture, tooltips and GDI objects on close; cancel pending requests.
 
-All tests must use synthetic temporary profiles. Keep build, dist, artifacts and databases out of Git. Retain .git; do not push or publish without authorization.
+All tests use synthetic profiles. Keep build, artifacts and databases out of Git. Retain .git; do not publish without user authorization.
 
-scripts/installer.nsi packages only the current native bundle. Install per-user, refuse updates while the app is running, and preserve the user profile. Generate uninstall commands from shipped files; never recursively remove an arbitrary installation directory. Installer acceptance uses a separate app name, executable and uninstall key so the installed application stays untouched.
+Package only the native executable and icon. Install per-user, refuse replacement while running, and preserve the profile. Delete only known shipped legacy files and empty directories; never recursively delete an arbitrary installation directory. Installer acceptance uses separate names, paths and registry keys so an installed user application stays untouched.

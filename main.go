@@ -7,7 +7,7 @@ import (
 	"local.codex.monitor/internal/nativeapp"
 )
 
-// The dashboard and data service run in Go; the transparent widget is bundled separately.
+// The dashboard, transparent desktop widget and data service run in Go.
 //
 //go:embed assets/locales/*.json assets/icon.png assets/monitor-glass.png
 var resources embed.FS

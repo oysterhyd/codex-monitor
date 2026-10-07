@@ -108,7 +108,7 @@ func Seed(dir string) error {
 	if err = db.Close(); err != nil {
 		return err
 	}
-	service, err := monitor.Start(monitor.Config{Data: dir, Home: filepath.Join(dir, "source"), Offline: true, Version: "2.4.2"})
+	service, err := monitor.Start(monitor.Config{Data: dir, Home: filepath.Join(dir, "source"), Offline: true, Version: "2.6.0"})
 	if err != nil {
 		return err
 	}
