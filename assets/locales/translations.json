@@ -1,4 +1,8 @@
 {
+  "软件更新": "Software updates",
+  "当前版本": "Current version",
+  "检查更新": "Check for updates",
+  "手动检查 GitHub 正式版本，下载后验证签名。更新保留监测数据与设置。": "Manually check stable GitHub releases and verify downloaded signatures. Updates preserve monitoring data and settings.",
   "未定价": "Unpriced",
   " + 未定价": " + unpriced",
   " 秒": " sec",

@@ -28,9 +28,7 @@ func (a *App) View(c *ui.Context) {
 		}
 	}
 	shell := ui.Column(c).Key("shell").Absolute().Left(0).Right(0)
-	opacity := shellOpacity(c, shell, a.shellEpoch, a.widgetClosing)
-	offset := 10 * (1 - opacity)
-	shell.Top(offset).Bottom(-offset).Opacity(opacity).Disabled(a.widgetClosing)
+	shell.Top(0).Bottom(0)
 	shell.Children(func() {
 		a.header(c)
 		ui.Scroll(c).Key("main-scroll").TrackScroll(&a.mainScroll).Grow(1).ClipX().Children(func() {

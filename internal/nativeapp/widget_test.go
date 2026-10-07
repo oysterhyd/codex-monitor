@@ -14,7 +14,7 @@ import (
 	"local.codex.monitor/internal/testfixture"
 )
 
-func fixtureWidget(t *testing.T) (widgetModel, *widgetPainter) {
+func fixtureWidget(t testing.TB) (widgetModel, *widgetPainter) {
 	t.Helper()
 	dir := t.TempDir()
 	if err := testfixture.Seed(dir); err != nil {
@@ -28,6 +28,7 @@ func fixtureWidget(t *testing.T) (widgetModel, *widgetPainter) {
 	if err = json.Unmarshal(raw, &m.Data); err != nil {
 		t.Fatal(err)
 	}
+	normalizeLists(m.Data)
 	m.Visible = true
 	m.visibility.target = 1
 	m.ReduceMotion = true

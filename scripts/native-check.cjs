@@ -17,6 +17,9 @@ try {
   for(const key of ['insideWorkArea','captionVisible','resizable','movable','minimizable','maximizable','closable','moveWorked','resizeWorked','minimizeWorked','maximizeWorked','closeToTrayWorked'])assert.equal(result.window[key],true,`window ${key}`);
   assert.equal(result.page,4);assert.equal(result.rendered,4);assert.equal(result.widgetVerified,true);
   const widget=JSON.parse(fs.readFileSync(path.join(out,'widget-result.json'),'utf8'));
+  const switching=JSON.parse(fs.readFileSync(path.join(out,'switch-performance.json'),'utf8'));
+  assert.equal(switching.updaterConfigured,true,'signed native updater is configured');
+  assert.equal(switching.rapidReverse,true,'rapid window reversal');
   for(const key of ['layered','fixedSize','rendered','perPixelAlpha','noBrowserChildren','orbHit','transparentHit','keyboardExpand','expiredUnknown','errorVisible','reducedMotion','retryRecovered','topmostToggle','hidePersisted','dragWorked','dragDidNotExpand'])assert.equal(widget[key],true,`widget ${key}`);
   for(const state of ['card','hover','morph','orb','english-expired','disconnected'])assert.ok(fs.statSync(path.join(out,`widget-${state}.png`)).size>1000);
   for(const page of ['overview','activity','history','quota','settings'])assert.ok(fs.statSync(path.join(out,`${page}.png`)).size>1000);

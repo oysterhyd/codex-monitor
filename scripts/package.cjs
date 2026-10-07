@@ -97,7 +97,9 @@ if (require.main === module) {
   if (build.status !== 0) process.exit(build.status || 1);
   const output = compile();
   const digest = crypto.createHash('sha256').update(fs.readFileSync(output)).digest('hex');
-  fs.writeFileSync(path.join(root, 'release', `SHA256SUMS-${version}.txt`), `${digest}  ${path.basename(output)}\n`);
+  const updates = require('./updates.cjs').signedUpdate(bundle, path.dirname(output));
+  const hashes = [output, ...updates].map(file => `${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}  ${path.basename(file)}`);
+  fs.writeFileSync(path.join(root, 'release', `SHA256SUMS-${version}.txt`), hashes.join('\n') + '\n');
   console.log(`Installer: ${output}\nSHA-256: ${digest}`);
 }
 

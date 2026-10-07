@@ -2,11 +2,10 @@ package monitor
 
 import (
 	"math"
-	"sort"
 	"time"
 )
 
-func (s *Store) activity(f Object, prices []Object, now time.Time) Object {
+func activityBounds(f Object, now time.Time) (time.Time, time.Time) {
 	now = now.In(time.Local)
 	year := int(num(f["activityYear"]))
 	if year < 1970 || year > now.Year() || num(f["activityYear"]) != float64(year) {
@@ -14,6 +13,13 @@ func (s *Store) activity(f Object, prices []Object, now time.Time) Object {
 	}
 	start := time.Date(year, 1, 1, 0, 0, 0, 0, time.Local)
 	end := start.AddDate(1, 0, 0)
+	return start, end
+}
+
+func (s *Store) activity(f Object, pricing priceIndex, now time.Time, rows []Object) Object {
+	now = now.In(time.Local)
+	start, end := activityBounds(f, now)
+	year := start.Year()
 	where := ""
 	values := []any{}
 	for _, p := range [][2]string{{"account", "u.account"}, {"model", "u.model"}, {"session", "u.session"}, {"project", "s.project"}} {
@@ -34,7 +40,14 @@ func (s *Store) activity(f Object, prices []Object, now time.Time) Object {
 	}
 	today := now.Format("2006-01-02")
 	args := append([]any{iso(start), iso(end)}, values...)
-	for _, u := range s.mustQuery("SELECT u.* "+join+" WHERE u.ts>=? AND u.ts<?"+where+" ORDER BY u.ts", args...) {
+	if rows == nil {
+		rows = s.mustQuery("SELECT u.* "+join+" WHERE u.ts>=? AND u.ts<?"+where+" ORDER BY u.ts", args...)
+	}
+	lo, hi := iso(start), iso(end)
+	for _, u := range rows {
+		if ts := text(u["ts"]); ts < lo || ts >= hi {
+			continue
+		}
 		t := parse(u["ts"]).In(time.Local)
 		key := t.Format("2006-01-02")
 		if key > today {
@@ -47,7 +60,7 @@ func (s *Store) activity(f Object, prices []Object, now time.Time) Object {
 			order = append(order, day)
 			members[key] = map[string]bool{}
 		}
-		p := costOf(u, prices)
+		p := pricing.cost(u)
 		tokens := num(u["input"]) + num(u["output"])
 		day["total"] = num(day["total"]) + tokens
 		day["output"] = num(day["output"]) + num(u["output"])
@@ -151,40 +164,8 @@ func (s *Store) Widget(now time.Time) Object {
 			speed[bin]["total"] = num(speed[bin]["total"]) + num(r["output"])/3
 		}
 	}
-	quotas := s.mustQuery("SELECT q.* FROM (SELECT DISTINCT bucket,slot FROM quotas WHERE account=?) b JOIN quotas q ON q.rowid=(SELECT rowid FROM quotas WHERE account=? AND bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)", account, account)
-	buckets := []string{}
-	seen := map[string]bool{}
-	for _, q := range quotas {
-		b := text(q["bucket"])
-		if !seen[b] {
-			buckets = append(buckets, b)
-			seen[b] = true
-		}
-	}
-	sort.SliceStable(buckets, func(i, j int) bool {
-		if buckets[i] == "codex" {
-			return true
-		}
-		if buckets[j] == "codex" {
-			return false
-		}
-		return buckets[i] < buckets[j]
-	})
-	var bucket any
-	for _, b := range buckets {
-		for _, q := range quotas {
-			if q["bucket"] == b && num(q["minutes"]) == 300 {
-				bucket = b
-				break
-			}
-		}
-		if bucket != nil {
-			break
-		}
-	}
-	if bucket == nil && len(buckets) > 0 {
-		bucket = buckets[0]
-	}
+	quotas := s.latestQuotas(account)
+	bucket := widgetBucket(quotas)
 	chosen := []Object{}
 	for _, q := range quotas {
 		if q["bucket"] == bucket {
@@ -207,4 +188,32 @@ func (s *Store) Widget(now time.Time) Object {
 		r["bucket"] = bucket
 	}
 	return r
+}
+
+func widgetBucket(quotas []Object) any {
+	var first, primary any
+	prefer := func(candidate string, current any) bool {
+		if current == nil {
+			return true
+		}
+		previous := text(current)
+		return candidate != previous && (candidate == "codex" || previous != "codex" && candidate < previous)
+	}
+	for _, q := range quotas {
+		bucket := text(q["bucket"])
+		if prefer(bucket, first) {
+			first = bucket
+		}
+		if num(q["minutes"]) == 300 && prefer(bucket, primary) {
+			primary = bucket
+		}
+	}
+	if primary != nil {
+		return primary
+	}
+	return first
+}
+
+func (s *Store) latestQuotas(account any) []Object {
+	return s.mustQuery("SELECT q.* FROM (SELECT DISTINCT account,bucket,slot FROM quotas WHERE account=?) b JOIN quotas q ON q.rowid=(SELECT rowid FROM quotas WHERE account=b.account AND bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)", account)
 }

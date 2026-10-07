@@ -67,7 +67,41 @@ func widgetSample(out []byte, src *image.RGBA, x, y float64) {
 
 // Three linear-time box passes approximate CSS's Gaussian blur without a
 // browser filter or a copy of the desktop behind the transparent surface.
-func widgetBlur(src *image.RGBA, sigma float64) *image.RGBA {
+type widgetBlurWorkspace struct {
+	a, b, down                    *image.RGBA
+	source                        *image.RGBA
+	filteredSource                *image.RGBA
+	filteredWidth, filteredPasses int
+}
+
+func (w *widgetBlurWorkspace) apply(src *image.RGBA, sigma float64) *image.RGBA {
+	// Half-resolution filtering cuts the pixel work by four. Small radii
+	// retain full resolution so nearly-sharp text keeps its detail.
+	if sigma >= 1 {
+		bounds := image.Rect(0, 0, (src.Bounds().Dx()+1)/2, (src.Bounds().Dy()+1)/2)
+		if w.down == nil || w.down.Bounds() != bounds {
+			w.down = image.NewRGBA(bounds)
+			w.source = nil
+		}
+		if w.source != src {
+			for y := 0; y < bounds.Dy(); y++ {
+				for x := 0; x < bounds.Dx(); x++ {
+					x0, x1 := 2*x, min(2*x+1, src.Bounds().Dx()-1)
+					y0, y1 := 2*y, min(2*y+1, src.Bounds().Dy()-1)
+					for c := 0; c < 4; c++ {
+						w.down.Pix[y*w.down.Stride+x*4+c] = byte((int(src.Pix[y0*src.Stride+x0*4+c]) + int(src.Pix[y0*src.Stride+x1*4+c]) + int(src.Pix[y1*src.Stride+x0*4+c]) + int(src.Pix[y1*src.Stride+x1*4+c]) + 2) / 4)
+					}
+				}
+			}
+			w.source = src
+			w.filteredSource = nil
+		}
+		src, sigma = w.down, sigma/2
+	}
+	return w.full(src, sigma)
+}
+
+func (w *widgetBlurWorkspace) full(src *image.RGBA, sigma float64) *image.RGBA {
 	if sigma < .35 {
 		return src
 	}
@@ -78,7 +112,13 @@ func widgetBlur(src *image.RGBA, sigma float64) *image.RGBA {
 	width = max(1, width)
 	upper := width + 2
 	lowerPasses := int(math.Round((12*sigma*sigma - 3*float64(width*width) - 12*float64(width) - 9) / (-4*float64(width) - 4)))
+	if w.filteredSource == src && w.filteredWidth == width && w.filteredPasses == lowerPasses {
+		return w.b
+	}
 	input := src
+	if w.a == nil || w.a.Bounds() != src.Bounds() {
+		w.a, w.b = image.NewRGBA(src.Bounds()), image.NewRGBA(src.Bounds())
+	}
 	for pass := 0; pass < 3; pass++ {
 		size := upper
 		if pass < lowerPasses {
@@ -88,11 +128,12 @@ func widgetBlur(src *image.RGBA, sigma float64) *image.RGBA {
 		if radius == 0 {
 			continue
 		}
-		horizontal := image.NewRGBA(src.Bounds())
-		output := image.NewRGBA(src.Bounds())
-		widgetBoxBlur(input, horizontal, radius, true)
-		widgetBoxBlur(horizontal, output, radius, false)
-		input = output
+		widgetBoxBlur(input, w.a, radius, true)
+		widgetBoxBlur(w.a, w.b, radius, false)
+		input = w.b
+	}
+	if input != src {
+		w.filteredSource, w.filteredWidth, w.filteredPasses = src, width, lowerPasses
 	}
 	return input
 }

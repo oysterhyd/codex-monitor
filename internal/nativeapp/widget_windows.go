@@ -8,6 +8,7 @@ import (
 	"image"
 	"math"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -37,6 +38,7 @@ var wGetDPI = widgetUser.NewProc("GetDpiForWindow")
 var wGetLong = widgetUser.NewProc("GetWindowLongPtrW")
 var wSetLong = widgetUser.NewProc("SetWindowLongPtrW")
 var wSetTimer = widgetUser.NewProc("SetTimer")
+var wPost = widgetUser.NewProc("PostMessageW")
 var wKillTimer = widgetUser.NewProc("KillTimer")
 var wCapture = widgetUser.NewProc("SetCapture")
 var wRelease = widgetUser.NewProc("ReleaseCapture")
@@ -117,6 +119,12 @@ type widgetWindow struct {
 	grab, origin                         widgetPoint
 	frame                                *image.RGBA
 	renderError                          error
+	alpha                                byte
+	timerInterval                        uintptr
+	highResolution                       bool
+	frameStop                            chan struct{}
+	framePending                         atomic.Bool
+	frameGeneration                      uintptr
 }
 
 func widgetUTF16(s string) *uint16 { return windows.StringToUTF16Ptr(s) }
@@ -180,9 +188,59 @@ func (w *widgetWindow) context() context.Context { return w.ctx }
 func (w *widgetWindow) scale() float32           { return w.dpi }
 func (w *widgetWindow) wake() {
 	w.host.model.dirty = true
-	if w.hwnd != 0 {
-		wSetTimer.Call(w.hwnd, 1, 16, 0)
+	w.schedule(true)
+}
+func (w *widgetWindow) schedule(animated bool) {
+	interval := uintptr(100)
+	if animated {
+		interval = 15
 	}
+	if w.hwnd == 0 || interval == w.timerInterval {
+		return
+	}
+	if animated != w.highResolution {
+		proc := "timeEndPeriod"
+		if animated {
+			proc = "timeBeginPeriod"
+		}
+		windows.NewLazySystemDLL("winmm.dll").NewProc(proc).Call(1)
+		w.highResolution = animated
+	}
+	wKillTimer.Call(w.hwnd, 1)
+	w.stopFrames()
+	if animated {
+		// WM_TIMER is dispatched only after higher-priority GUI work. Post a
+		// coalesced frame message so paint traffic cannot starve a crossfade.
+		stop := make(chan struct{})
+		w.frameStop = stop
+		hwnd, generation := w.hwnd, w.frameGeneration
+		go func() {
+			ticker := time.NewTicker(15 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+					if w.framePending.CompareAndSwap(false, true) {
+						if ok, _, _ := wPost.Call(hwnd, 0x803b, generation, 0); ok == 0 {
+							w.framePending.Store(false)
+						}
+					}
+				}
+			}
+		}()
+	} else {
+		wSetTimer.Call(w.hwnd, 1, interval, 0)
+	}
+	w.timerInterval = interval
+}
+func (w *widgetWindow) stopFrames() {
+	if w.frameStop != nil {
+		close(w.frameStop)
+		w.frameStop = nil
+	}
+	w.frameGeneration++
 }
 func (w *widgetWindow) show() {
 	w.taskbar(true)
@@ -195,6 +253,12 @@ func (w *widgetWindow) hide() {
 	wShow.Call(w.hwnd, 0)
 	w.taskbar(false)
 	wKillTimer.Call(w.hwnd, 1)
+	w.stopFrames()
+	w.timerInterval = 0
+	if w.highResolution {
+		windows.NewLazySystemDLL("winmm.dll").NewProc("timeEndPeriod").Call(1)
+		w.highResolution = false
+	}
 }
 func (w *widgetWindow) taskbar(show bool) {
 	style, _, _ := wGetLong.Call(w.hwnd, widgetSigned(-20))
@@ -243,8 +307,7 @@ func (w *widgetWindow) anchor() {
 	w.host.persist()
 }
 func (w *widgetWindow) close() {
-	w.hideTooltip()
-	wKillTimer.Call(w.hwnd, 1)
+	w.hide()
 	if w.tooltip != 0 {
 		wDestroy.Call(w.tooltip)
 		w.tooltip = 0
@@ -287,9 +350,23 @@ func (w *widgetWindow) present(frame *image.RGBA) {
 			out[x], out[x+1], out[x+2], out[x+3] = row[x+2], row[x+1], row[x], row[x+3]
 		}
 	}
-	size := widgetPoint{X: int32(width), Y: int32(height)}
+	w.alpha = byte(math.Round(float64(w.host.model.visibility.value(time.Now()) * 255)))
+	w.compose()
+}
+func (w *widgetWindow) fade(alpha float32) {
+	value := byte(math.Round(float64(max(0, min(1, alpha)) * 255)))
+	if w.alpha != value {
+		w.alpha = value
+		w.compose()
+	}
+}
+func (w *widgetWindow) compose() {
+	if w.bitmap == 0 {
+		return
+	}
+	size := widgetPoint{X: int32(w.pixelWidth), Y: int32(w.pixelHeight)}
 	source := widgetPoint{}
-	blend := [4]byte{0, 0, 255, 1}
+	blend := [4]byte{0, 0, w.alpha, 1}
 	result, _, err := wLayered.Call(w.hwnd, 0, 0, uintptr(unsafe.Pointer(&size)), w.dc, uintptr(unsafe.Pointer(&source)), 0, uintptr(unsafe.Pointer(&blend[0])), 2)
 	if result == 0 {
 		w.renderError = fmt.Errorf("原生透明绘制失败：%w", err)
@@ -324,11 +401,15 @@ func (w *widgetWindow) poll(now time.Time) {
 	}
 	if !w.down && (x != w.host.model.pointerX || y != w.host.model.pointerY) {
 		if w.host.model.pointer(x, y, now) {
-			w.host.painter.invalidate()
+			w.host.painter.invalidateInteraction()
+			w.schedule(true)
 		}
 	}
 	w.updateTooltip(now, cursor)
 	w.host.tick(now)
+	if w.host.model.Visible || w.host.model.animating(now) || w.host.app.mainFade.active(now) {
+		w.schedule(w.host.model.animating(now) || w.host.app.mainFade.active(now))
+	}
 }
 func (w *widgetWindow) pointerMove() {
 	cursor := widgetCursor()
@@ -346,8 +427,10 @@ func (w *widgetWindow) movePointer(cursor widgetPoint) {
 			w.place(x, y)
 		}
 	}
-	w.host.model.pointer(float32(cursor.X-r.Left)/w.dpi, float32(cursor.Y-r.Top)/w.dpi, time.Now())
-	w.host.painter.invalidate()
+	if w.host.model.pointer(float32(cursor.X-r.Left)/w.dpi, float32(cursor.Y-r.Top)/w.dpi, time.Now()) {
+		w.host.painter.invalidateInteraction()
+		w.schedule(true)
+	}
 }
 func (w *widgetWindow) buttonDown() {
 	cursor := widgetCursor()
@@ -505,6 +588,12 @@ func widgetWndProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 	w := widgetWindows[hwnd]
 	if w != nil {
 		switch msg {
+		case 0x803b:
+			w.framePending.Store(false)
+			if wp == w.frameGeneration && w.highResolution {
+				w.poll(time.Now())
+			}
+			return 0
 		case 0x113:
 			w.poll(time.Now())
 			return 0

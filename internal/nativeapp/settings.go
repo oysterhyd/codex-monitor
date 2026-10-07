@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -76,6 +77,17 @@ func (a *App) settings(c *ui.Context) {
 					}
 				})
 			}).Gap(0)
+			panel(c, a.tr("软件更新"), "", func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(16).Children(func() {
+					ui.Column(c).Grow(1).Gap(5).Children(func() {
+						ui.Text(c, a.tr("当前版本")+" "+appVersion).FontWeight(600)
+						ui.Text(c, a.tr("手动检查 GitHub 正式版本，下载后验证签名。更新保留监测数据与设置。")).FontSize(11).TextColor(c.Theme().TextMuted)
+					})
+					if ui.Button(c, a.tr("检查更新")).Clicked() {
+						updater.CheckForUpdates()
+					}
+				})
+			})
 		case 1:
 			panel(c, a.tr("账号管理"), "", func() {
 				ui.Text(c, a.tr("自动识别本机登录账号；仅保存账号标识摘要和显示名称，不保存登录凭据。可添加历史账号并修改显示名称。"))

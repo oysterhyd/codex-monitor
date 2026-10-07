@@ -37,6 +37,9 @@ func text(v any) string {
 	if v == nil {
 		return ""
 	}
+	if s, ok := v.(string); ok {
+		return s
+	}
 	if n, ok := v.(float64); ok {
 		if n == 0 {
 			return "0"
@@ -331,16 +334,16 @@ func (s *Store) query(q string, args ...any) ([]Object, error) {
 		return nil, e
 	}
 	out := []Object{}
+	values := make([]any, len(cols))
+	p := make([]any, len(cols))
+	for i := range values {
+		p[i] = &values[i]
+	}
 	for r.Next() {
-		values := make([]any, len(cols))
-		p := make([]any, len(cols))
-		for i := range values {
-			p[i] = &values[i]
-		}
 		if e = r.Scan(p...); e != nil {
 			return nil, e
 		}
-		row := Object{}
+		row := make(Object, len(cols))
 		for i, k := range cols {
 			v := values[i]
 			if b, ok := v.([]byte); ok {

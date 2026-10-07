@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
+	updaterNative "github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -22,6 +24,7 @@ type Options struct {
 	Offline, Hidden, Smoke, SmokeWidget bool
 	RepairDatabase                      bool
 	Stdio                               bool
+	CheckUpdates                        bool
 }
 type App struct {
 	client                                              *Client
@@ -62,13 +65,16 @@ type App struct {
 	mainScroll                                          ui.ScrollState
 	snapshotKey                                         string
 	snapshotPage                                        int
-	shellEpoch                                          uint64
+	snapshotRevision                                    uint64
+	breakdownCache                                      breakdownCache
 	widgetClosing, reduceMotion                         bool
+	mainFade                                            widgetMotion
+	mainRefreshPending                                  bool
 	windowVerification                                  Object
 }
 
 func NewApp() *App {
-	return &App{data: Object{}, filter: Object{"range": "today"}, recordPage: 1, breakdownPage: 1, selectedRecord: -1, shellEpoch: 1, snapshotPage: -1,
+	return &App{data: Object{}, filter: Object{"range": "today"}, recordPage: 1, breakdownPage: 1, selectedRecord: -1, mainFade: widgetMotion{target: 1}, snapshotPage: -1,
 		startDate: time.Now(), endDate: time.Now(), translations: map[string]string{}, systemTranslations: map[string]string{}, accountDrafts: map[string]string{},
 		priceForm: map[string]string{"model": "", "input": "", "cached": "", "output": "", "cache_write": "0", "effective": "1970-01-01T00:00"}}
 }
@@ -87,8 +93,23 @@ func Run(resources fs.FS) error {
 	flag.BoolVar(&o.Smoke, "smoke", false, "capture all native pages and exit")
 	flag.BoolVar(&o.SmokeWidget, "smoke-widget", false, "verify native transparent widget")
 	flag.BoolVar(&o.Stdio, "stdio", false, "run the Go data service over private stdio")
+	flag.BoolVar(&o.CheckUpdates, "check-updates", false, "check the signed update feed and exit without opening monitor data")
 	flag.BoolVar(&o.RepairDatabase, "repair-database", false, "back up and repair monitor database, then exit")
 	flag.Parse()
+	if o.CheckUpdates {
+		mygo.App.SetVersion(appVersion)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		update, err := mygo.Updater.Check(ctx)
+		if err != nil {
+			return err
+		}
+		result := Object{"version": appVersion, "upToDate": update == nil}
+		if update != nil {
+			result["availableVersion"] = update.Version
+		}
+		return json.NewEncoder(os.Stdout).Encode(result)
+	}
 	if o.Data == "" {
 		o.Data = filepath.Join(os.Getenv("APPDATA"), "codex-monitor")
 	}
@@ -135,7 +156,7 @@ func Run(resources fs.FS) error {
 	if o.Offline || (os.Getenv("MONITOR_TEST_DATA") != "" && os.Getenv("MONITOR_PI_HOME") == "") {
 		piHome, piSessions = "", ""
 	}
-	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, Offline: o.Offline, Version: "2.6.0"})
+	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, Offline: o.Offline, Version: appVersion})
 	if err != nil {
 		if o.Snapshot == "" && !o.Stdio {
 			mygo.App.WhenReady(func() {
@@ -175,6 +196,13 @@ func Run(resources fs.FS) error {
 		return err
 	}
 	a := NewApp()
+	mygo.App.SetVersion(appVersion)
+	icon, _ := fs.ReadFile(resources, "assets/icon.png")
+	// Use the SDK's native updater: manual checks only, no webview runtime.
+	mygo.Use(updaterNative.New(updater.Options{DisableAutomaticChecks: true, Icon: icon}))
+	// SDK relaunch starts after OnQuit and before Run returns. Release the
+	// profile lock here so the new process never races the deferred Close.
+	mygo.App.OnQuit(client.Close)
 	a.resources = resources
 	a.client = client
 	a.options = o
@@ -286,6 +314,10 @@ func (a *App) load() {
 	if a.client == nil {
 		return
 	}
+	if a.mainFade.active(time.Now()) {
+		a.mainRefreshPending = true
+		return
+	}
 	if a.loading {
 		a.requested = true
 		return
@@ -301,6 +333,9 @@ func (a *App) load() {
 		var next Object
 		if err == nil {
 			err = json.Unmarshal(b, &next)
+			if err == nil {
+				normalizeLists(next)
+			}
 		}
 		a.win.Update(func() {
 			a.loading = false
@@ -309,6 +344,7 @@ func (a *App) load() {
 					a.errorText = err.Error()
 				} else {
 					a.data = next
+					a.snapshotRevision++
 					a.snapshotPage = a.page
 					key, _ := json.Marshal(f)
 					a.snapshotKey = string(key)
@@ -393,15 +429,23 @@ func (a *App) performWith(fn func() (any, error), success string, done func()) {
 }
 func (a *App) restore() {
 	a.widgetClosing = false
-	a.shellEpoch++
-	if a.widget != nil {
-		a.widget.hide()
-	}
+	wasWidget := a.widgetMode
 	a.widgetMode = false
 	if a.win.IsMinimized() {
 		a.win.Restore()
 	}
 	a.keepWindowVisible()
+	if wasWidget && a.widget != nil && !a.reduceMotion {
+		a.mainFade.to(1, time.Now(), motionEnter)
+		a.win.SetOpacity(float64(a.mainFade.from))
+		a.widget.hide(true)
+	} else {
+		a.mainFade = widgetMotion{target: 1}
+		a.win.SetOpacity(1)
+		if a.widget != nil {
+			a.widget.hide()
+		}
+	}
 	a.win.Show()
 	a.win.Focus()
 	a.updateTray()
@@ -424,7 +468,9 @@ func (a *App) events() {
 				a.win.Update(func() { a.progress = progress })
 			case "updated", "recovered":
 				a.win.Update(func() {
-					a.load()
+					if a.win.IsVisible() && !a.widgetMode {
+						a.load()
+					}
 					if a.widget != nil {
 						a.widget.update()
 					}
@@ -437,7 +483,11 @@ func (a *App) events() {
 				go a.notifyQuota(message.Data)
 			}
 		case <-ticker.C:
-			a.win.Update(func() { a.load() })
+			a.win.Update(func() {
+				if a.win.IsVisible() && !a.widgetMode {
+					a.load()
+				}
+			})
 		case <-a.client.done:
 			return
 		}
@@ -574,6 +624,7 @@ func (a *App) smoke() {
 		}
 		if verified {
 			a.verifyNativeWidget()
+			a.verifySwitching()
 		}
 		a.updateWait(func() {
 			if !verified {

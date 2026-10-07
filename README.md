@@ -81,11 +81,13 @@ Codex Monitor 是 Windows x64 本机监测工具。主窗口使用 **MyGO native
 
 ## 快速开始
 
-[下载 Windows x64 安装包](https://github.com/oysterhyd/codex-monitor/releases/download/v2.6.0/Codex-Monitor-Setup-2.6.0.exe) · [版本说明与 SHA-256 校验](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.6.0)
+[下载 Windows x64 安装包](https://github.com/oysterhyd/codex-monitor/releases/download/v2.6.1/Codex-Monitor-Setup-2.6.1.exe) · [版本说明与 SHA-256 校验](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.6.1)
 
-运行 `Codex-Monitor-Setup-2.6.0.exe`，按向导选择安装目录。默认安装到 `%LOCALAPPDATA%\Programs\Codex Monitor`，无需管理员权限，并创建桌面和开始菜单快捷方式。
+运行 `Codex-Monitor-Setup-2.6.1.exe`，按向导选择安装目录。默认安装到 `%LOCALAPPDATA%\Programs\Codex Monitor`，无需管理员权限，并创建桌面和开始菜单快捷方式。
 
 安装包内的原生主程序同时包含主窗口和桌面小窗口，使用时无需安装 Go 或 Node.js。实时数据需要本机已有 Codex 安装及登录状态。升级时会移除旧版小窗口已知的 Electron 运行文件，保留用户额外添加的文件。更新前请从托盘完全退出应用；安装和卸载均保留 `%APPDATA%\codex-monitor` 中的统计与设置。
+
+从 2.6.1 起，**设置与价格 → 通用 → 软件更新 → 检查更新** 打开 MyGO 原生更新窗口，检查 GitHub 正式版本、显示版本说明并验证下载签名，安装后可重新启动。默认只手动检查；更新不读取或上传监测记录。源码 `go run .` 的开发构建未启用签名更新，使用 `npm run build` 生成发布构建。内置更新替换主程序和图标；Windows 卸载登记的版本号在下一次运行安装包时同步。
 
 <details>
 <summary><strong>从源码运行或构建便携目录</strong></summary>
@@ -132,7 +134,11 @@ Go 可通过 PATH 查找，也支持 `%LOCALAPPDATA%\Programs\go\bin\go.exe` 或
 
 测试使用 Go 生成的合成数据和临时目录。`artifacts/`、`build/` 和数据库均被 Git 忽略；源码结构见 [架构说明](docs/architecture.md)。
 
+整体代码审查、算法改动、测试条件和优化前后指标见 [性能与代码简化报告](docs/performance.md)。
+
 制作安装包另需 **NSIS 3 与 Unicode nsProcess 插件**。可使用 PATH 中的 `makensis.exe`，或通过 `MAKENSIS` / `NSIS_PLUGIN_DIR` 指定编译器与插件目录；脚本也会识别已有 electron-builder 的 NSIS 缓存。产物为 `release/Codex-Monitor-Setup-<版本>.exe` 和 `SHA256SUMS-<版本>.txt`，打包不依赖 electron-builder。
+
+签名更新还使用 Windows 自带 `tar.exe`。`npm run package` 通过 `MYGO_UPDATER_PRIVATE_KEY`（MyGO 格式的 Base64 私钥）或 `MYGO_UPDATER_KEY_FILE` 读取签名密钥；本机默认位置是 `%LOCALAPPDATA%\codex-monitor\update-keys\mygo-update.key`。私钥不放入仓库，`mygo.json` 仅保存对应公钥。缺少密钥时仍可生成安装包，但不会生成签名更新。持续发布须保留同一私钥；同时上传安装包、`Codex-Monitor-<版本>-windows-amd64.tar.gz`、`update-windows-amd64.json` 和校验文件，全部资产就绪后再发布 Release。`--check-updates` 可直接验证更新源，不打开监测数据库。
 
 <a id="指标口径"></a>
 

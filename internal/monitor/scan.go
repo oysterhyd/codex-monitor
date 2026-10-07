@@ -153,11 +153,12 @@ func (s *Store) Scan(ctx context.Context, home, piHome, piSessions string, full 
 				return e
 			}
 			reader := bufio.NewReaderSize(input, 256*1024)
+			var scratch []byte
 			for {
 				if e = ctx.Err(); e != nil {
 					return e
 				}
-				line, next := reader.ReadBytes('\n')
+				line, next := readScanLine(reader, &scratch)
 				if next == io.EOF {
 					break
 				}
@@ -259,6 +260,23 @@ func (s *Store) Scan(ctx context.Context, home, piHome, piSessions string, full 
 		}
 	}
 	return status, nil
+}
+
+// Borrow normal lines from the reader. Only an oversized line needs scratch
+// space, which is reused within this file. EOF's incomplete line is left for
+// the next scan, preserving the committed offset of append-only JSONL files.
+func readScanLine(reader *bufio.Reader, scratch *[]byte) ([]byte, error) {
+	*scratch = (*scratch)[:0]
+	for {
+		part, err := reader.ReadSlice('\n')
+		if len(*scratch) == 0 && err != bufio.ErrBufferFull {
+			return part, err
+		}
+		*scratch = append(*scratch, part...)
+		if err != bufio.ErrBufferFull {
+			return *scratch, err
+		}
+	}
 }
 func abs(v float64) float64 {
 	if v < 0 {

@@ -8,6 +8,48 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// One derived list per snapshot/filter/order. Animation frames reuse it.
+type breakdownCache struct {
+	revision   uint64
+	key, query string
+	order      ui.SortOrder
+	valid      bool
+	rows       []Object
+}
+
+func (a *App) breakdownRows(key string) []Object {
+	query := strings.ToLower(a.breakdownSearch)
+	cache := &a.breakdownCache
+	if cache.valid && cache.revision == a.snapshotRevision && cache.key == key && cache.query == query && cache.order == a.breakdownSort {
+		return cache.rows
+	}
+	rows := []Object{}
+	for _, row := range objects(a.data[key]) {
+		if query == "" || strings.Contains(strings.ToLower(str(row["name"])+" "+str(row["project"])), query) {
+			rows = append(rows, row)
+		}
+	}
+	column, descending := a.breakdownSort.Column, a.breakdownSort.Descending
+	if column == "" {
+		column, descending = "total", true
+	}
+	// The service already sorts totals descending, with stable tie order.
+	if column != "total" || !descending {
+		sort.SliceStable(rows, func(i, j int) bool {
+			left, right := rows[i], rows[j]
+			if descending {
+				left, right = right, left
+			}
+			if column == "name" {
+				return str(left["name"]) < str(right["name"])
+			}
+			return number(left[column]) < number(right[column])
+		})
+	}
+	*cache = breakdownCache{revision: a.snapshotRevision, key: key, query: query, order: a.breakdownSort, valid: true, rows: rows}
+	return rows
+}
+
 func (a *App) history(c *ui.Context) {
 	a.summaryStrip(c)
 	panel(c, a.tr("消耗明细"), a.tr("共 {0} 条", len(objects(a.data[[]string{"models", "projects", "tasks"}[a.viewIndex]]))), func() {
@@ -31,32 +73,7 @@ func (a *App) history(c *ui.Context) {
 			a.load()
 		}
 		key := []string{"models", "projects", "tasks"}[a.viewIndex]
-		var rows []Object
-		for _, row := range objects(a.data[key]) {
-			if strings.Contains(strings.ToLower(str(row["name"])+" "+str(row["project"])), strings.ToLower(a.breakdownSearch)) {
-				rows = append(rows, row)
-			}
-		}
-		column := a.breakdownSort.Column
-		if column == "" {
-			column = "total"
-		}
-		descending := a.breakdownSort.Descending
-		if a.breakdownSort.Column == "" {
-			descending = true
-		}
-		sort.SliceStable(rows, func(i, j int) bool {
-			if column == "name" {
-				if descending {
-					return str(rows[i]["name"]) > str(rows[j]["name"])
-				}
-				return str(rows[i]["name"]) < str(rows[j]["name"])
-			}
-			if descending {
-				return number(rows[i][column]) > number(rows[j][column])
-			}
-			return number(rows[i][column]) < number(rows[j][column])
-		})
+		rows := a.breakdownRows(key)
 		pages := max(1, (len(rows)+49)/50)
 		a.breakdownPage = max(1, min(a.breakdownPage, pages))
 		start := (a.breakdownPage - 1) * 50

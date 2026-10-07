@@ -19,6 +19,12 @@ type widgetHost struct {
 	closed, fetching, pending, manual bool
 	wasAnimating                      bool
 	lastPoll                          time.Time
+	measurement                       *switchMeasurement
+	staged                            *widgetResult
+}
+type widgetResult struct {
+	data Object
+	err  error
 }
 type widgetPlacement struct {
 	PositionKnown bool `json:"-"`
@@ -37,12 +43,29 @@ func (h *widgetHost) persist() {
 	b, _ := json.Marshal(h.saved)
 	_ = os.WriteFile(filepath.Join(h.app.options.Data, "widget-window.json"), b, 0600)
 }
-func (h *widgetHost) show() {
+func (h *widgetHost) show() bool {
+	started := time.Now()
 	h.model.setVisible(true, time.Now())
 	h.saved.Mode = true
+	h.tick(time.Now()) // Present a valid surface before exposing the window.
+	if h.closed {
+		return false
+	}
+	if h.measurement != nil {
+		h.measurement.stage("prepareScene", started)
+	}
+	started = time.Now()
 	h.window.show()
+	if h.measurement != nil {
+		h.measurement.stage("showWindow", started)
+	}
+	started = time.Now()
 	h.persist()
 	h.update()
+	if h.measurement != nil {
+		h.measurement.stage("persistAndRequest", started)
+	}
+	return true
 }
 func (h *widgetHost) hide(animate ...bool) {
 	h.model.setVisible(false, time.Now())
@@ -95,20 +118,16 @@ func (h *widgetHost) request(manual bool) {
 		var data Object
 		if err == nil {
 			err = json.Unmarshal(raw, &data)
+			if err == nil {
+				normalizeLists(data)
+			}
 		}
 		h.app.win.Update(func() {
 			if h.closed {
 				return
 			}
 			h.fetching = false
-			h.model.Busy = false
-			if err != nil {
-				h.model.Error = err.Error()
-			} else {
-				h.model.Data, h.model.Error = data, ""
-				h.app.widgetVerified = true
-			}
-			h.painter.invalidate()
+			h.staged = &widgetResult{data: data, err: err}
 			h.window.wake()
 			if h.pending {
 				manual := h.manual
@@ -122,11 +141,38 @@ func (h *widgetHost) tick(now time.Time) {
 	if h.closed {
 		return
 	}
+	started := time.Now()
+	// Commit incoming content after the short crossfade. Heavy scene work
+	// must not occupy the GUI thread between its native alpha steps.
+	if h.staged != nil && !h.model.visibility.active(now) && !h.app.mainFade.active(now) {
+		result := h.staged
+		h.staged = nil
+		h.model.Busy = false
+		if result.err != nil {
+			h.model.Error = result.err.Error()
+		} else {
+			h.model.Data, h.model.Error = result.data, ""
+			h.app.widgetVerified = true
+		}
+		h.painter.invalidate()
+	}
 	if h.model.Visible && now.Sub(h.lastPoll) >= 3*time.Second {
 		h.update()
 	}
 	active := h.model.animating(now)
-	if h.model.dirty || active || h.wasAnimating {
+	painting := active && !h.model.visibility.active(now) || h.model.morphing(now)
+	// Visibility is composed by Windows; it does not invalidate the scene.
+	for _, motion := range h.model.bars {
+		painting = painting || motion.active(now)
+	}
+	for _, motion := range h.model.hoverMotion {
+		painting = painting || motion.active(now)
+	}
+	painting = painting || h.model.Busy && !h.model.ReduceMotion
+	if h.model.dirty || painting || h.wasAnimating {
+		if h.measurement != nil {
+			h.measurement.sceneRenders++
+		}
 		h.window.present(h.painter.render(now, h.window.scale()))
 		if err := h.window.renderFailure(); err != nil {
 			h.app.errorText = err.Error()
@@ -137,8 +183,13 @@ func (h *widgetHost) tick(now time.Time) {
 		}
 		h.model.dirty = false
 	}
-	h.wasAnimating = active
-	if !h.model.Visible && !h.model.animating(now) {
+	h.window.fade(h.model.visibility.value(now))
+	h.wasAnimating = painting
+	h.app.tickMainFade(now)
+	if h.measurement != nil && (active || h.app.mainFade.active(now)) {
+		h.measurement.record(started, time.Since(started))
+	}
+	if !h.model.Visible && !active && !h.app.mainFade.active(now) {
 		h.window.hide()
 	}
 }
@@ -170,27 +221,10 @@ func (a *App) toggleWidget() {
 		a.restore()
 		return
 	}
-	if a.widgetClosing {
-		return
-	}
-	if a.reduceMotion || !a.win.IsVisible() {
-		a.showWidget()
-		return
-	}
-	a.widgetClosing = true
-	time.AfterFunc(motionQuick, func() {
-		a.win.Update(func() {
-			if a.quitting || !a.widgetClosing {
-				return
-			}
-			a.widgetClosing = false
-			if a.win.IsVisible() {
-				a.showWidget()
-			}
-		})
-	})
+	a.showWidget()
 }
 func (a *App) showWidget() {
+	started := time.Now()
 	if a.widgetMode {
 		a.restore()
 		return
@@ -222,8 +256,39 @@ func (a *App) showWidget() {
 		h.window = w
 		a.widget = h
 	}
-	a.widget.show()
+	if !a.widget.show() {
+		return
+	}
 	a.widgetMode = true
-	a.win.Hide()
+	if a.reduceMotion || !a.win.IsVisible() {
+		a.win.Hide()
+		a.mainFade = widgetMotion{target: 0}
+	} else {
+		a.widgetClosing = true
+		a.mainFade.to(0, time.Now(), motionQuick)
+		a.widget.window.wake()
+	}
 	a.updateTray()
+	if a.widget.measurement != nil {
+		a.widget.measurement.stage("showWidgetTotal", started)
+	}
+}
+
+func (a *App) tickMainFade(now time.Time) {
+	if a.win == nil || a.mainFade.start.IsZero() {
+		return
+	}
+	a.win.SetOpacity(float64(a.mainFade.value(now)))
+	if !a.mainFade.active(now) {
+		if a.mainFade.target == 0 {
+			a.win.Hide()
+			a.widgetClosing = false
+			a.win.SetOpacity(1)
+		}
+		a.mainFade.start = time.Time{}
+		if a.mainRefreshPending && a.mainFade.target == 1 {
+			a.mainRefreshPending = false
+			a.load()
+		}
+	}
 }

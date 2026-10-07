@@ -25,14 +25,26 @@ type widgetPainter struct {
 	metricBitmaps         [4]*ui.Bitmap
 	cardBitmap, orbBitmap *ui.Bitmap
 	filteredCard          *ui.Bitmap
+	cardImage             *image.RGBA
+	frameImage            *image.RGBA
+	lastShape             float32
+	blur                  widgetBlurWorkspace
 	scale                 float32
 	dirty                 bool
+	interactionDirty      bool
+	metricState           [4]widgetMetricPaint
+}
+
+type widgetMetricPaint struct {
+	bar, hover float32
+	light      [2]float32
 }
 
 func newWidgetPainter(model *widgetModel, brand *ui.Bitmap) *widgetPainter {
 	return &widgetPainter{model: model, brand: brand, dirty: true}
 }
-func (p *widgetPainter) invalidate() { p.dirty = true; p.model.dirty = true }
+func (p *widgetPainter) invalidate()            { p.dirty = true; p.model.dirty = true }
+func (p *widgetPainter) invalidateInteraction() { p.interactionDirty = true; p.model.dirty = true }
 func widgetTheme(c *ui.Context) {
 	t := ui.LightTheme()
 	t.Background = ui.Transparent
@@ -69,13 +81,6 @@ func (p *widgetPainter) render(now time.Time, scale float32) *image.RGBA {
 			p.dirty = true
 		}
 	}
-	active := m.Busy && !m.ReduceMotion
-	for _, a := range m.bars {
-		active = active || a.active(now)
-	}
-	for _, a := range m.hoverMotion {
-		active = active || a.active(now)
-	}
 	if p.card == nil {
 		p.card = ui.NewTester(p.cardView, 536, 356)
 		p.card.SetScale(scale)
@@ -83,8 +88,11 @@ func (p *widgetPainter) render(now time.Time, scale float32) *image.RGBA {
 		p.orb.SetScale(scale)
 		p.dirty = true
 	}
-	if p.dirty || active {
-		for i := 0; i < 4; i++ {
+	changed := p.dirty || p.interactionDirty
+	cardChanged := changed || m.Busy && !m.ReduceMotion
+	for i := 0; i < 4; i++ {
+		state := widgetMetricPaint{bar: m.bars[i].value(now), hover: m.hoverMotion[i].value(now), light: m.light[i]}
+		if p.dirty || state != p.metricState[i] {
 			if p.metricLayers[i] == nil {
 				index := i
 				p.metricLayers[i] = ui.NewTester(func(c *ui.Context) { p.metricView(c, index) }, 159, 160)
@@ -98,12 +106,25 @@ func (p *widgetPainter) render(now time.Time, scale float32) *image.RGBA {
 				img = widgetTilt(img, m, widgetMetricRect(i), hover, scale)
 			}
 			p.metricBitmaps[i] = ui.NewBitmap(img)
+			p.metricState[i] = state
+			cardChanged = true
 		}
+	}
+	if cardChanged {
 		p.card.Frame()
+		p.cardImage = p.card.Image()
+		p.cardBitmap = ui.NewBitmap(p.cardImage)
+	}
+	orbChanged := changed || m.hoverMotion[4].active(now)
+	if orbChanged {
 		p.orb.Frame()
-		p.cardBitmap = ui.NewBitmap(p.card.Image())
 		p.orbBitmap = ui.NewBitmap(p.orb.Image())
-		p.dirty = false
+	}
+	p.dirty = false
+	p.interactionDirty = false
+	shape := m.shape.value(now)
+	if p.frame != nil && !changed && !cardChanged && !orbChanged && shape == p.lastShape && !m.morphing(now) {
+		return p.frameImage
 	}
 	p.filteredCard = p.cardBitmap
 	if !m.ReduceMotion && m.morphing(now) {
@@ -115,7 +136,7 @@ func (p *widgetPainter) render(now time.Time, scale float32) *image.RGBA {
 			visible = elapsed > 180
 		}
 		if visible && sigma > .35 {
-			p.filteredCard = ui.NewBitmap(widgetBlur(p.card.Image(), sigma))
+			p.filteredCard = ui.NewBitmap(p.blur.apply(p.cardImage, sigma))
 		}
 	}
 	if p.frame == nil {
@@ -124,7 +145,8 @@ func (p *widgetPainter) render(now time.Time, scale float32) *image.RGBA {
 	} else {
 		p.frame.Frame()
 	}
-	return p.frame.Image()
+	p.lastShape, p.frameImage = shape, p.frame.Image()
+	return p.frameImage
 }
 func (p *widgetPainter) frameView(c *ui.Context) {
 	widgetTheme(c)
@@ -132,13 +154,8 @@ func (p *widgetPainter) frameView(c *ui.Context) {
 	now := m.clock
 	r := m.glass(now)
 	shape := m.shape.value(now)
-	alpha := m.visibility.value(now)
-	size := .975 + .025*alpha
-	// Enter/exit transforms share the CSS origin at the centre of the surface.
-	r.X += (1 - size) * r.W / 2
-	r.Y += 7*(1-alpha) + (1-size)*r.H/2
-	r.W *= size
-	r.H *= size
+	// Native window alpha composes visibility without rebuilding this scene.
+	alpha, size := float32(1), float32(1)
 	radius := (30 + 30*shape) * size
 	outer := widgetBox(c, r.X, r.Y, r.W, r.H).Radius(radius).Opacity(alpha)
 	outer.Draw(func(p *ui.Painter, r ui.Rect) { p.Shadow(r, radius, 0, 5, 11, 0, ui.Hex("#19335730")) })

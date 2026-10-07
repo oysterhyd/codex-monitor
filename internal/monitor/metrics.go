@@ -36,14 +36,35 @@ func Bounds(f Object, now time.Time) (time.Time, time.Time, error) {
 	}
 	return start, end, nil
 }
-func costOf(r Object, prices []Object) Object {
+
+// Store.prices is ordered by effective date, manual priority, then ID.
+// Filtering into per-model slices preserves that tie order for Search.
+type priceIndex map[string][]Object
+
+func indexPrices(prices []Object) priceIndex {
+	index := make(priceIndex)
 	for _, p := range prices {
-		if !truth(p["retired"]) && p["model"] == r["model"] && text(p["effective"]) <= text(r["ts"]) {
-			plain := math.Max(0, num(r["input"])-num(r["cached"])-num(r["cache_write"]))
-			in := plain*num(p["input"]) + num(r["cached"])*num(p["cached"]) + num(r["cache_write"])*num(p["cache_write"])
-			out := num(r["output"]) * num(p["output"])
-			return Object{"inputCost": in / 1e6, "outputCost": out / 1e6, "cost": (in + out) / 1e6, "saved": num(r["cached"]) * (num(p["input"]) - num(p["cached"])) / 1e6, "priceId": p["id"]}
+		if !truth(p["retired"]) {
+			model := text(p["model"])
+			index[model] = append(index[model], p)
 		}
+	}
+	return index
+}
+func (index priceIndex) cost(r Object) Object {
+	prices, ts := index[text(r["model"])], text(r["ts"])
+	i := sort.Search(len(prices), func(i int) bool { return text(prices[i]["effective"]) <= ts })
+	if i < len(prices) {
+		return pricedCost(r, prices[i])
+	}
+	return pricedCost(r, nil)
+}
+func pricedCost(r, p Object) Object {
+	if p != nil {
+		plain := math.Max(0, num(r["input"])-num(r["cached"])-num(r["cache_write"]))
+		in := plain*num(p["input"]) + num(r["cached"])*num(p["cached"]) + num(r["cache_write"])*num(p["cache_write"])
+		out := num(r["output"]) * num(p["output"])
+		return Object{"inputCost": in / 1e6, "outputCost": out / 1e6, "cost": (in + out) / 1e6, "saved": num(r["cached"]) * (num(p["input"]) - num(p["cached"])) / 1e6, "priceId": p["id"]}
 	}
 	return Object{"inputCost": nil, "outputCost": nil, "cost": nil, "saved": nil, "priceId": nil}
 }
@@ -171,6 +192,7 @@ func (s *Store) Snapshot(input Object, now time.Time) (Object, error) {
 	pageSize = max(1, min(200, pageSize))
 	requested := max(1, int(num(f["recordPage"])))
 	prices := s.prices()
+	pricing := indexPrices(prices)
 	sessions := map[string]Object{}
 	available := []Object{}
 	if optionsWanted || truth(f["project"]) {
@@ -225,7 +247,7 @@ func (s *Store) Snapshot(input Object, now time.Time) (Object, error) {
 	maps := map[string]*ranking{"models": newRanking(), "projects": newRanking(), "tasks": newRanking(), "timeline": newRanking()}
 	hourly := !truth(f["range"]) || f["range"] == "today"
 	for _, u := range usage {
-		p := costOf(u, prices)
+		p := pricing.cost(u)
 		sums["requests"] = num(sums["requests"]) + 1
 		if u["kind"] != "逐次记录" && u["kind"] != PiKind && u["kind"] != PiOpenAIKind {
 			sums["legacyRequests"] = num(sums["legacyRequests"]) + 1
@@ -321,7 +343,7 @@ func (s *Store) Snapshot(input Object, now time.Time) (Object, error) {
 		modelRows := []Object{}
 		models := map[string]Object{}
 		for _, u := range byTurn[text(t["id"])] {
-			p := costOf(u, prices)
+			p := pricing.cost(u)
 			addTotal(totals, u, p)
 			key := text(u["model"])
 			if models[key] == nil {
@@ -373,7 +395,7 @@ func (s *Store) Snapshot(input Object, now time.Time) (Object, error) {
 			active++
 		}
 	}
-	quotas := s.mustQuery("SELECT q.* FROM (SELECT DISTINCT account,bucket,slot FROM quotas WHERE account=?) b JOIN quotas q ON q.rowid=(SELECT rowid FROM quotas WHERE account=b.account AND bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)", account)
+	quotas := s.latestQuotas(account)
 	history := []Object{}
 	samples := 0
 	if historyWanted {
@@ -457,7 +479,19 @@ func (s *Store) Snapshot(input Object, now time.Time) (Object, error) {
 	}
 	var activity any
 	if has("all", "overview", "activity") {
-		activity = s.activity(f, prices, now)
+		var loaded []Object
+		activityStart, activityEnd := activityBounds(f, now)
+		// Activity ignores future calendar days. Reuse the analytics rows
+		// when their bounds cover every day it could display.
+		local := now.In(time.Local)
+		tomorrow := time.Date(local.Year(), local.Month(), local.Day()+1, 0, 0, 0, 0, time.Local)
+		if activityEnd.After(tomorrow) {
+			activityEnd = tomorrow
+		}
+		if analytics && !start.After(activityStart) && !end.Before(activityEnd) {
+			loaded = usage
+		}
+		activity = s.activity(f, pricing, now, loaded)
 	}
 	var status any
 	if q := obj(s.get("quotaStatus")); q["account"] == account {
@@ -560,14 +594,14 @@ func (s *Store) Export(f Object, now time.Time) (string, error) {
 		params = append([]any{f["project"]}, params...)
 	}
 	rows := s.mustQuery("SELECT u.*,s.project,t.id record_id,t.session record_session,t.model record_model FROM usage u LEFT JOIN sessions s ON s.id=u.session"+join+" LEFT JOIN turns t ON t.id=u.turn AND t.session=u.session WHERE "+strings.Join(conditions, " AND ")+" ORDER BY u.ts", params...)
-	prices := s.prices()
+	pricing := indexPrices(s.prices())
 	cols := []string{"ts", "model", "session", "turn", "input", "cached", "output", "reasoning", "cache_write", "cost", "saved", "priceId", "kind", "account"}
 	lines := []string{strings.Join(cols, ",")}
 	for _, r := range rows {
 		if !matches(Object{"id": r["record_id"], "session": r["record_session"], "model": r["record_model"]}, r["project"], search) {
 			continue
 		}
-		for k, v := range costOf(r, prices) {
+		for k, v := range pricing.cost(r) {
 			r[k] = v
 		}
 		cells := []string{}

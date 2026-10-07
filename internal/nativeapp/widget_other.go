@@ -22,6 +22,7 @@ func (*widgetWindow) close()                   {}
 func (*widgetWindow) topmost(bool)             {}
 func (*widgetWindow) anchor()                  {}
 func (*widgetWindow) present(*image.RGBA)      {}
+func (*widgetWindow) fade(float32)             {}
 func (*widgetWindow) key(uintptr)              {}
 func (*widgetWindow) renderFailure() error     { return nil }
 func (*widgetWindow) verify() Object           { return Object{} }

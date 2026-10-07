@@ -105,39 +105,3 @@ func animatedProgress(c *ui.Context, key string, value float64) *ui.Element {
 	})
 	return e
 }
-
-type visibilityMotion struct {
-	epoch           uint64
-	closing         bool
-	start           time.Time
-	from, to, shown float32
-	duration        time.Duration
-}
-
-func shellOpacity(c *ui.Context, e *ui.Element, epoch uint64, closing bool) float32 {
-	m := ui.Local(e, "visibility", func() visibilityMotion { return visibilityMotion{} })
-	if m.epoch != epoch {
-		*m = visibilityMotion{epoch: epoch, start: c.Now(), to: 1, duration: motionEnter}
-	}
-	if m.closing != closing {
-		m.closing = closing
-		m.start = c.Now()
-		m.from = m.shown
-		m.to = 1
-		m.duration = motionEnter
-		if closing {
-			m.to = 0
-			m.duration = motionQuick
-		}
-	}
-	if c.Preferences().ReduceMotion {
-		m.shown = m.to
-		return m.shown
-	}
-	t := float32(c.Now().Sub(m.start)) / float32(m.duration)
-	m.shown = m.from + (m.to-m.from)*motionEase(t)
-	if t < 1 {
-		c.AnimationFrame()
-	}
-	return m.shown
-}

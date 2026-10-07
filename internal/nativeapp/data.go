@@ -51,6 +51,9 @@ func obj(v any) Object {
 	return Object{}
 }
 func objects(v any) []Object {
+	if rows, ok := v.([]Object); ok {
+		return rows
+	}
 	a, _ := v.([]any)
 	r := make([]Object, 0, len(a))
 	for _, v := range a {
@@ -59,12 +62,59 @@ func objects(v any) []Object {
 	return r
 }
 func stringsOf(v any) []string {
+	if values, ok := v.([]string); ok {
+		return values
+	}
 	a, _ := v.([]any)
 	r := make([]string, 0, len(a))
 	for _, v := range a {
 		r = append(r, str(v))
 	}
 	return r
+}
+
+// Convert homogeneous JSON lists once, as the snapshot enters the UI.
+// Subsequent frames borrow typed slices instead of copying every element.
+func normalizeLists(o Object) {
+	for key, value := range o {
+		switch value := value.(type) {
+		case map[string]any:
+			normalizeLists(Object(value))
+		case []any:
+			if len(value) == 0 {
+				continue
+			}
+			switch value[0].(type) {
+			case map[string]any:
+				rows := make([]Object, 0, len(value))
+				for _, item := range value {
+					row, ok := item.(map[string]any)
+					if !ok {
+						rows = nil
+						break
+					}
+					normalizeLists(Object(row))
+					rows = append(rows, Object(row))
+				}
+				if rows != nil {
+					o[key] = rows
+				}
+			case string:
+				values := make([]string, 0, len(value))
+				for _, item := range value {
+					s, ok := item.(string)
+					if !ok {
+						values = nil
+						break
+					}
+					values = append(values, s)
+				}
+				if values != nil {
+					o[key] = values
+				}
+			}
+		}
+	}
 }
 func str(v any) string {
 	if v == nil {

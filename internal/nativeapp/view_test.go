@@ -14,7 +14,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func fixtureApp(t *testing.T) *App {
+func fixtureApp(t testing.TB) *App {
 	t.Helper()
 	file := os.Getenv("MONITOR_NATIVE_FIXTURE")
 	if file == "" {
@@ -36,6 +36,7 @@ func fixtureApp(t *testing.T) *App {
 	if err = json.Unmarshal(b, &a.data); err != nil {
 		t.Fatal(err)
 	}
+	normalizeLists(a.data)
 	for p, d := range map[string]*map[string]string{"translations.json": &a.translations, "system-translations.json": &a.systemTranslations} {
 		b, err := os.ReadFile(filepath.Join("..", "..", "assets", "locales", p))
 		if err != nil {

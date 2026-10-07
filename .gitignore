@@ -9,6 +9,7 @@ artifacts/
 
 # Local configuration, credentials and captured account data
 .env
+mygo-update.key
 .env.*
 !.env.example
 *.local
