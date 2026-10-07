@@ -17,18 +17,27 @@ logs/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 *.sqlite
 *.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite3-journal
+.tmp/
+.tmp-*/
+.tmp-*.json
+.agent-teams/
+
+# Desktop distribution files belong in release assets, not source commits
+*.exe
+*.msi
+*.blockmap
 
 # Editor and OS files
 .vs/
 .idea/
 Thumbs.db
 Desktop.ini
-
-# Local tests are not part of the public source snapshot
-tests/
-*.test.*
-scripts/*smoke*
-*.sqlite-wal
-*.sqlite-shm

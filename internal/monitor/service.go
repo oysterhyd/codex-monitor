@@ -1,0 +1,235 @@
+package monitor
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type Config struct {
+	Data, Home, PiHome, PiSessions, Version string
+	Offline                                 bool
+}
+type Event struct {
+	Name string
+	Data any
+}
+type reply struct {
+	data json.RawMessage
+	err  error
+}
+type job struct {
+	method string
+	args   json.RawMessage
+	reply  chan reply
+}
+type Service struct {
+	config         Config
+	store          *Store
+	jobs           chan job
+	Events         chan Event
+	ctx            context.Context
+	cancel         context.CancelFunc
+	done           chan struct{}
+	release        func()
+	quotaBusy      bool
+	quotaBinary    string
+	refreshPending []chan reply
+}
+
+func Start(config Config) (*Service, error) {
+	release, e := AcquireProfileLock(config.Data)
+	if e != nil {
+		return nil, e
+	}
+	s, e := Open(filepath.Join(config.Data, "monitor.sqlite"))
+	if e != nil {
+		release()
+		return nil, e
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	v := &Service{config: config, store: s, jobs: make(chan job, 32), Events: make(chan Event, 64), ctx: ctx, cancel: cancel, done: make(chan struct{}), release: release}
+	go v.loop()
+	return v, nil
+}
+func (s *Service) emit(name string, data any) {
+	select {
+	case s.Events <- Event{name, data}:
+	default:
+	}
+}
+func (s *Service) loop() {
+	defer close(s.done)
+	defer close(s.Events)
+	defer s.release()
+	defer s.store.Close()
+	scan := time.NewTicker(3 * time.Second)
+	quota := time.NewTicker(5 * time.Second)
+	defer scan.Stop()
+	defer quota.Stop()
+	if !s.config.Offline {
+		s.scan(false)
+		s.beginQuota()
+	}
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case j := <-s.jobs:
+			if j.method == "refresh" && !s.config.Offline {
+				s.scan(true)
+				if j.reply != nil {
+					s.refreshPending = append(s.refreshPending, j.reply)
+				}
+				s.beginQuota()
+				continue
+			}
+			r, e := s.handle(j.method, j.args)
+			if j.reply != nil {
+				j.reply <- reply{r, e}
+			}
+		case <-scan.C:
+			if !s.config.Offline {
+				s.scan(false)
+			}
+		case <-quota.C:
+			if !s.config.Offline {
+				q := obj(s.store.get("quotaStatus"))
+				if parse(q["attempted"]).IsZero() || time.Since(parse(q["attempted"])) >= time.Duration(num(s.store.settings()["quotaInterval"]))*time.Second {
+					s.beginQuota()
+				}
+			}
+		}
+	}
+}
+func (s *Service) Call(ctx context.Context, method string, args any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	raw, e := json.Marshal(args)
+	if e != nil {
+		return nil, e
+	}
+	j := job{method: method, args: raw, reply: make(chan reply, 1)}
+	select {
+	case s.jobs <- j:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.done:
+		return nil, errors.New("采集服务已退出")
+	}
+	select {
+	case r := <-j.reply:
+		return r.data, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.done:
+		return nil, errors.New("采集服务已退出")
+	}
+}
+func (s *Service) Close() { s.cancel(); <-s.done }
+func (s *Service) handle(method string, raw json.RawMessage) (out json.RawMessage, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
+	var value any
+	var args any
+	_ = json.Unmarshal(raw, &args)
+	p := obj(args)
+	now := time.Now()
+	switch method {
+	case "snapshot":
+		r, e := s.store.Snapshot(p, now)
+		if e != nil {
+			return nil, e
+		}
+		var pi any
+		if s.config.PiSessions != "" {
+			pi = s.config.PiSessions
+		}
+		r["paths"] = Object{"data": s.config.Data, "home": s.config.Home, "piSessions": pi}
+		r["version"] = s.config.Version
+		value = r
+	case "widget":
+		if n := num(p["now"]); n > 0 {
+			now = time.UnixMilli(int64(n))
+		}
+		value = s.store.Widget(now)
+	case "settings":
+		value, err = s.store.saveSettings(p)
+	case "price":
+		value, err = s.store.savePrice(p)
+	case "deletePrice":
+		value, err = s.store.deletePrice(args)
+	case "account":
+		value, err = s.store.saveAccount(p)
+	case "export":
+		value, err = s.store.Export(p, now)
+	case "clear":
+		err = s.store.clear(now)
+		value = true
+	case "refresh":
+		if !s.config.Offline {
+			s.scan(true)
+			s.beginQuota()
+		}
+		value = true
+	case "notice":
+		before := s.store.mustOne("SELECT id FROM notices WHERE id=?", args)
+		err = s.store.exec("INSERT OR IGNORE INTO notices VALUES(?,?)", args, iso(now))
+		value = len(before) == 0
+	case "_quota":
+		s.applyQuota(p)
+		return nil, nil
+	case "_scan":
+		piHome, piSessions := s.config.PiHome, s.config.PiSessions
+		if v, ok := p["piHome"].(string); ok {
+			piHome = v
+		}
+		if v, ok := p["piSessions"].(string); ok {
+			piSessions = v
+		}
+		_, err = s.store.Scan(s.ctx, s.config.Home, piHome, piSessions, true, func(v Object) { s.emit("progress", v) })
+		value = true
+	default:
+		return nil, fmt.Errorf("未知操作")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if method != "snapshot" && method != "widget" && method != "export" && method != "notice" {
+		s.emit("updated", nil)
+	}
+	return json.Marshal(value)
+}
+func (s *Service) scan(full bool) {
+	defer func() {
+		if recover() != nil {
+			s.emit("error", "读取本机统计记录失败，将自动重试")
+		}
+	}()
+	status, e := s.store.Scan(s.ctx, s.config.Home, s.config.PiHome, s.config.PiSessions, full, func(p Object) { s.emit("progress", p) })
+	if e != nil {
+		if s.ctx.Err() == nil {
+			s.emit("error", "读取本机统计记录失败，将自动重试")
+		}
+		return
+	}
+	if truth(status["changed"]) || truth(status["full"]) || num(status["errors"]) > 0 {
+		s.emit("updated", nil)
+	}
+	if num(status["errors"]) > 0 {
+		entry := Object{"at": iso(time.Now()), "code": "scan_records", "count": status["errors"], "items": status["diagnostics"]}
+		file := filepath.Join(s.config.Data, "diagnostics.jsonl")
+		if f, e := os.OpenFile(file, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); e == nil {
+			_, _ = f.WriteString(jsonText(entry) + "\n")
+			_ = f.Close()
+		}
+	}
+}

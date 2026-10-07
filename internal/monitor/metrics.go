@@ -1,0 +1,584 @@
+package monitor
+
+import (
+	"fmt"
+	"math"
+	"sort"
+	"strings"
+	"time"
+)
+
+func Bounds(f Object, now time.Time) (time.Time, time.Time, error) {
+	local := now.In(time.Local)
+	start := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local)
+	end := start.AddDate(0, 0, 1)
+	switch text(f["range"]) {
+	case "7d":
+		start = start.AddDate(0, 0, -6)
+	case "30d":
+		start = start.AddDate(0, 0, -29)
+	case "all":
+		start = time.Unix(0, 0)
+	case "custom":
+		var e error
+		start, e = time.ParseInLocation("2006-01-02", text(f["start"]), time.Local)
+		if e != nil {
+			return start, end, fmt.Errorf("请选择完整日期范围")
+		}
+		end, e = time.ParseInLocation("2006-01-02", text(f["end"]), time.Local)
+		if e != nil {
+			return start, end, fmt.Errorf("日期范围无效")
+		}
+		end = end.AddDate(0, 0, 1)
+	}
+	if !end.After(start) {
+		return start, end, fmt.Errorf("日期范围无效")
+	}
+	return start, end, nil
+}
+func costOf(r Object, prices []Object) Object {
+	for _, p := range prices {
+		if !truth(p["retired"]) && p["model"] == r["model"] && text(p["effective"]) <= text(r["ts"]) {
+			plain := math.Max(0, num(r["input"])-num(r["cached"])-num(r["cache_write"]))
+			in := plain*num(p["input"]) + num(r["cached"])*num(p["cached"]) + num(r["cache_write"])*num(p["cache_write"])
+			out := num(r["output"]) * num(p["output"])
+			return Object{"inputCost": in / 1e6, "outputCost": out / 1e6, "cost": (in + out) / 1e6, "saved": num(r["cached"]) * (num(p["input"]) - num(p["cached"])) / 1e6, "priceId": p["id"]}
+		}
+	}
+	return Object{"inputCost": nil, "outputCost": nil, "cost": nil, "saved": nil, "priceId": nil}
+}
+func addNumbers(to, from Object, keys ...string) {
+	for _, k := range keys {
+		to[k] = num(to[k]) + num(from[k])
+	}
+}
+func emptyRank(name string) Object {
+	return Object{"name": name, "total": 0., "input": 0., "output": 0., "cached": 0., "cost": 0., "unpriced": 0., "requests": 0.}
+}
+func emptyTotals() Object {
+	return Object{"input": 0., "cached": 0., "output": 0., "inputCost": 0., "outputCost": 0., "cost": 0., "unpriced": 0., "requests": 0.}
+}
+func finishTotals(t Object) Object {
+	if num(t["requests"]) == 0 || num(t["unpriced"]) == num(t["requests"]) {
+		t["inputCost"], t["outputCost"], t["cost"] = nil, nil, nil
+	}
+	return t
+}
+func addTotal(t, r, p Object) {
+	t["requests"] = num(t["requests"]) + 1
+	addNumbers(t, r, "input", "cached", "output")
+	if p["cost"] == nil {
+		t["unpriced"] = num(t["unpriced"]) + 1
+	} else {
+		addNumbers(t, p, "inputCost", "outputCost", "cost")
+	}
+}
+func matches(t Object, project any, search string) bool {
+	if search == "" {
+		return true
+	}
+	for _, v := range []any{t["id"], t["session"], t["model"], project} {
+		if strings.Contains(strings.ToLower(text(v)), search) {
+			return true
+		}
+	}
+	return false
+}
+
+type ranking struct {
+	byKey map[string]Object
+	order []Object
+}
+
+func newRanking() *ranking { return &ranking{byKey: map[string]Object{}, order: []Object{}} }
+func (r *ranking) add(key string, u, p Object) {
+	v := r.byKey[key]
+	if v == nil {
+		v = emptyRank(key)
+		r.byKey[key] = v
+		r.order = append(r.order, v)
+	}
+	v["total"] = num(v["total"]) + num(u["input"]) + num(u["output"])
+	addNumbers(v, u, "input", "output", "cached")
+	v["cost"] = num(v["cost"]) + num(p["cost"])
+	v["requests"] = num(v["requests"]) + 1
+	if p["cost"] == nil {
+		v["unpriced"] = num(v["unpriced"]) + 1
+	}
+}
+func (r *ranking) rank() []Object {
+	sort.SliceStable(r.order, func(i, j int) bool { return num(r.order[i]["total"]) > num(r.order[j]["total"]) })
+	return r.order
+}
+func (s *Store) resolve(f Object) Object {
+	f = clone(f)
+	if f["account"] == "current" {
+		a := s.get("currentAccount")
+		if !truth(a) {
+			a = Unknown
+		}
+		f["account"] = a
+	}
+	return f
+}
+func projectOf(sessions map[string]Object, id any) string {
+	p := text(sessions[text(id)]["project"])
+	if p == "" {
+		p = UnassignedProject
+	}
+	return p
+}
+func (s *Store) Snapshot(input Object, now time.Time) (Object, error) {
+	f := s.resolve(input)
+	start, end, e := Bounds(f, now)
+	if e != nil {
+		return nil, e
+	}
+	lo, hi := iso(start), iso(end)
+	page := text(f["page"])
+	if page == "" {
+		page = "all"
+	}
+	has := func(names ...string) bool {
+		for _, n := range names {
+			if n == page {
+				return true
+			}
+		}
+		return false
+	}
+	analytics := has("all", "overview", "history")
+	optionsWanted := has("all", "overview", "history", "settings", "activity")
+	recordsWanted := has("all", "history")
+	historyWanted := has("all", "quota")
+	views := []string{}
+	switch page {
+	case "all":
+		views = []string{"models", "projects", "tasks"}
+	case "overview":
+		views = []string{"models"}
+	case "history":
+		v := text(f["view"])
+		if v != "projects" && v != "tasks" {
+			v = "models"
+		}
+		views = []string{v}
+	}
+	pageSize := int(num(f["pageSize"]))
+	if pageSize == 0 {
+		pageSize = 200
+	}
+	pageSize = max(1, min(200, pageSize))
+	requested := max(1, int(num(f["recordPage"])))
+	prices := s.prices()
+	sessions := map[string]Object{}
+	available := []Object{}
+	if optionsWanted || truth(f["project"]) {
+		for _, r := range s.mustQuery("SELECT * FROM sessions") {
+			sessions[text(r["id"])] = r
+			available = append(available, r)
+		}
+	}
+	if truth(f["account"]) && optionsWanted {
+		members := map[string]bool{}
+		for _, r := range s.mustQuery("SELECT DISTINCT session FROM usage WHERE account=?", f["account"]) {
+			members[text(r["session"])] = true
+		}
+		kept := []Object{}
+		for _, r := range available {
+			if members[text(r["id"])] {
+				kept = append(kept, r)
+			}
+		}
+		available = kept
+	}
+	conditions := []string{"u.ts>=?", "u.ts<?"}
+	params := []any{lo, hi}
+	for _, pair := range [][2]string{{"account", "u.account"}, {"model", "u.model"}, {"session", "u.session"}, {"project", "s.project"}} {
+		if truth(f[pair[0]]) {
+			conditions = append(conditions, pair[1]+"=?")
+			params = append(params, f[pair[0]])
+		}
+	}
+	usage, turns := []Object{}, []Object{}
+	if analytics {
+		usage = s.mustQuery("SELECT u.* FROM usage u LEFT JOIN sessions s ON s.id=u.session WHERE "+strings.Join(conditions, " AND ")+" ORDER BY u.ts", params...)
+		tc := []string{"t.started>=?", "t.started<?"}
+		tp := []any{lo, hi}
+		for _, k := range []string{"account", "model"} {
+			if truth(f[k]) {
+				tc = append(tc, "(t."+k+"=? OR EXISTS (SELECT 1 FROM usage u WHERE u.turn=t.id AND u.session=t.session AND u."+k+"=?))")
+				tp = append(tp, f[k], f[k])
+			}
+		}
+		if truth(f["session"]) {
+			tc = append(tc, "t.session=?")
+			tp = append(tp, f["session"])
+		}
+		if truth(f["project"]) {
+			tc = append(tc, "s.project=?")
+			tp = append(tp, f["project"])
+		}
+		turns = s.mustQuery("SELECT t.* FROM turns t LEFT JOIN sessions s ON s.id=t.session WHERE "+strings.Join(tc, " AND ")+" ORDER BY t.started DESC,t.id DESC", tp...)
+	}
+	sums := Object{"input": 0., "cached": 0., "output": 0., "reasoning": 0., "cache_write": 0., "cost": 0., "saved": 0., "unpriced": 0., "requests": 0., "legacyRequests": 0.}
+	maps := map[string]*ranking{"models": newRanking(), "projects": newRanking(), "tasks": newRanking(), "timeline": newRanking()}
+	hourly := !truth(f["range"]) || f["range"] == "today"
+	for _, u := range usage {
+		p := costOf(u, prices)
+		sums["requests"] = num(sums["requests"]) + 1
+		if u["kind"] != "逐次记录" && u["kind"] != PiKind && u["kind"] != PiOpenAIKind {
+			sums["legacyRequests"] = num(sums["legacyRequests"]) + 1
+		}
+		addNumbers(sums, u, "input", "cached", "output", "reasoning", "cache_write")
+		if p["cost"] == nil {
+			sums["unpriced"] = num(sums["unpriced"]) + 1
+		} else {
+			addNumbers(sums, p, "cost", "saved")
+		}
+		for _, v := range views {
+			key := text(u["model"])
+			if v == "projects" {
+				key = projectOf(sessions, u["session"])
+			}
+			if v == "tasks" {
+				key = text(u["session"])
+			}
+			maps[v].add(key, u, p)
+		}
+		if has("all", "overview") {
+			format := "2006-01-02"
+			if hourly {
+				format += " 15:00"
+			}
+			maps["timeline"].add(parse(u["ts"]).In(time.Local).Format(format), u, p)
+		}
+	}
+	completed, failed, aborted := 0, 0, 0
+	timed, latency := []Object{}, []Object{}
+	recordTurns := []Object{}
+	search := strings.ToLower(strings.TrimSpace(text(f["recordSearch"])))
+	for _, t := range turns {
+		switch t["status"] {
+		case "completed":
+			completed++
+			if num(t["duration"]) > 0 {
+				timed = append(timed, t)
+			}
+		case "failed":
+			failed++
+		case "aborted":
+			aborted++
+		}
+		if t["ttft"] != nil {
+			latency = append(latency, t)
+		}
+		if recordsWanted && (!truth(f["recordStatus"]) || t["status"] == f["recordStatus"]) && matches(t, sessions[text(t["session"])]["project"], search) {
+			recordTurns = append(recordTurns, t)
+		}
+	}
+	if f["recordOrder"] == "oldest" {
+		for i, j := 0, len(recordTurns)-1; i < j; i, j = i+1, j-1 {
+			recordTurns[i], recordTurns[j] = recordTurns[j], recordTurns[i]
+		}
+	}
+	pages := max(1, (len(recordTurns)+pageSize-1)/pageSize)
+	recordPage := min(requested, pages)
+	begin := min(len(recordTurns), (recordPage-1)*pageSize)
+	chosen := recordTurns[begin:min(len(recordTurns), begin+pageSize)]
+	byTurn := map[string][]Object{}
+	outputByTurn := map[string]float64{}
+	if analytics {
+		q := "SELECT t.id, COALESCE(SUM(u.output),0) output FROM turns t LEFT JOIN usage u ON u.turn=t.id AND u.session=t.session "
+		p := []any{}
+		if truth(f["account"]) {
+			q += "AND u.account=? "
+			p = append(p, f["account"])
+		}
+		p = append(p, lo, hi)
+		for _, r := range s.mustQuery(q+"WHERE t.started>=? AND t.started<? GROUP BY t.id", p...) {
+			outputByTurn[text(r["id"])] = num(r["output"])
+		}
+	}
+	if len(chosen) > 0 {
+		ids := []any{}
+		marks := []string{}
+		for _, t := range chosen {
+			ids = append(ids, t["id"])
+			marks = append(marks, "?")
+		}
+		for _, r := range s.mustQuery("SELECT u.* FROM usage u JOIN turns t ON t.id=u.turn AND t.session=u.session WHERE t.id IN ("+strings.Join(marks, ",")+") ORDER BY u.ts", ids...) {
+			if truth(f["account"]) && r["account"] != f["account"] {
+				continue
+			}
+			byTurn[text(r["turn"])] = append(byTurn[text(r["turn"])], r)
+		}
+	}
+	records := []Object{}
+	for _, t := range chosen {
+		r := clone(t)
+		totals := emptyTotals()
+		modelRows := []Object{}
+		models := map[string]Object{}
+		for _, u := range byTurn[text(t["id"])] {
+			p := costOf(u, prices)
+			addTotal(totals, u, p)
+			key := text(u["model"])
+			if models[key] == nil {
+				v := emptyTotals()
+				v["model"] = u["model"]
+				models[key] = v
+				modelRows = append(modelRows, v)
+			}
+			addTotal(models[key], u, p)
+		}
+		for k, v := range finishTotals(totals) {
+			r[k] = v
+		}
+		for _, m := range modelRows {
+			finishTotals(m)
+		}
+		r["models"] = modelRows
+		r["project"] = projectOf(sessions, t["session"])
+		records = append(records, r)
+	}
+	duration, output := 0., 0.
+	var latest Object
+	for _, t := range timed {
+		tokens := outputByTurn[text(t["id"])]
+		if tokens <= 0 {
+			continue
+		}
+		duration += num(t["duration"])
+		output += tokens
+		if latest == nil {
+			latest = clone(t)
+			latest["output"] = tokens
+		}
+	}
+	var account any = f["account"]
+	if !truth(account) {
+		account = s.get("currentAccount")
+	}
+	if !truth(account) {
+		account = Unknown
+	}
+	aq := any(nil)
+	if truth(f["account"]) {
+		aq = f["account"]
+	}
+	active := 0
+	for _, t := range s.mustQuery("SELECT t.* FROM turns t WHERE t.status='running' AND t.last_seen>=? AND (? IS NULL OR t.account=? OR EXISTS (SELECT 1 FROM usage u WHERE u.turn=t.id AND u.session=t.session AND u.account=?)) ORDER BY t.started DESC,t.id DESC", iso(now.Add(-2*time.Minute)), aq, aq, aq) {
+		if (!truth(f["model"]) || t["model"] == f["model"]) && (!truth(f["session"]) || t["session"] == f["session"]) && (!truth(f["project"]) || sessions[text(t["session"])]["project"] == f["project"]) {
+			active++
+		}
+	}
+	quotas := s.mustQuery("SELECT q.* FROM (SELECT DISTINCT account,bucket,slot FROM quotas WHERE account=?) b JOIN quotas q ON q.rowid=(SELECT rowid FROM quotas WHERE account=b.account AND bucket=b.bucket AND slot=b.slot ORDER BY ts DESC,rowid DESC LIMIT 1)", account)
+	history := []Object{}
+	samples := 0
+	if historyWanted {
+		history, samples = s.quotaHistory(account, lo, hi)
+	}
+	sums["total"] = num(sums["input"]) + num(sums["output"])
+	sums["cacheRate"] = nil
+	if num(sums["input"]) > 0 {
+		sums["cacheRate"] = num(sums["cached"]) / num(sums["input"])
+	}
+	performance := Object{"completed": completed, "failed": failed, "aborted": aborted, "successRate": nil, "active": active, "activeReason": "最近 2 分钟有统计事件且未结束的任务；等待或静默任务可能不计入", "avgDuration": nil, "ttft": nil, "ttftSamples": len(latency), "taskTps": nil, "latestTps": nil, "latestAt": nil}
+	if completed+failed > 0 {
+		performance["successRate"] = float64(completed) / float64(completed+failed)
+	}
+	if len(timed) > 0 {
+		v := 0.
+		for _, t := range timed {
+			v += num(t["duration"])
+		}
+		performance["avgDuration"] = v / float64(len(timed))
+	}
+	if len(latency) > 0 {
+		v := 0.
+		for _, t := range latency {
+			v += num(t["ttft"])
+		}
+		performance["ttft"] = v / float64(len(latency))
+	}
+	if duration > 0 {
+		performance["taskTps"] = output / (duration / 1000)
+	}
+	if latest != nil {
+		performance["latestTps"] = num(latest["output"]) / (num(latest["duration"]) / 1000)
+		performance["latestAt"] = latest["ended"]
+	}
+	tasks := maps["tasks"].rank()
+	for _, t := range tasks {
+		t["project"] = projectOf(sessions, t["name"])
+	}
+	timeline := maps["timeline"].order
+	sort.SliceStable(timeline, func(i, j int) bool { return text(timeline[i]["name"]) < text(timeline[j]["name"]) })
+	for _, r := range timeline {
+		v := text(r["name"])
+		format := "2006-01-02"
+		if strings.Contains(v, " ") {
+			format += " 15:04"
+		}
+		t, _ := time.ParseInLocation(format, v, time.Local)
+		r["time"] = t.UnixMilli()
+	}
+	options := Object{"models": []string{}, "projects": []string{}, "sessions": []Object{}}
+	accountArgs := []any{}
+	accountClause := ""
+	if truth(f["account"]) {
+		accountArgs = append(accountArgs, f["account"])
+		accountClause = "WHERE account=?"
+	}
+	if optionsWanted {
+		models := []string{}
+		for _, r := range s.mustQuery("SELECT DISTINCT model FROM usage "+accountClause+" ORDER BY model", accountArgs...) {
+			models = append(models, text(r["model"]))
+		}
+		projects := []string{}
+		seen := map[string]bool{}
+		for _, r := range available {
+			p := text(r["project"])
+			if !seen[p] {
+				projects = append(projects, p)
+				seen[p] = true
+			}
+		}
+		sort.Strings(projects)
+		options["models"], options["projects"] = models, projects
+	}
+	if has("all", "settings") {
+		v := []Object{}
+		for _, r := range available {
+			v = append(v, Object{"id": r["id"], "project": r["project"]})
+		}
+		options["sessions"] = v
+	}
+	var activity any
+	if has("all", "overview", "activity") {
+		activity = s.activity(f, prices, now)
+	}
+	var status any
+	if q := obj(s.get("quotaStatus")); q["account"] == account {
+		status = q
+	}
+	priceOutput := []Object{}
+	if has("all", "settings") {
+		priceOutput = prices
+	}
+	return Object{"activity": activity, "range": Object{"start": lo, "end": hi}, "sums": sums, "performance": performance, "models": maps["models"].rank(), "projects": maps["projects"].rank(), "tasks": tasks, "timeline": timeline, "turns": records, "quotas": quotas, "records": Object{"page": recordPage, "pageSize": pageSize, "total": len(recordTurns), "pages": pages}, "quotaHistorySamples": samples, "quotaHistory": history, "quotaAccount": account, "scan": s.get("scan"), "quotaStatus": status, "currentAccount": s.get("currentAccount"), "accounts": s.mustQuery("SELECT * FROM accounts ORDER BY label,id"), "coverage": s.mustOne("SELECT MIN(ts) first,MAX(ts) last,COUNT(*) records FROM usage "+accountClause, accountArgs...), "options": options, "settings": s.settings(), "prices": priceOutput, "recovery": s.get("recovery")}, nil
+}
+
+func (s *Store) quotaHistory(account any, lo, hi string) ([]Object, int) {
+	qs := s.mustQuery("SELECT * FROM quotas WHERE account=? AND ts>=? AND ts<? ORDER BY ts", account, lo, hi)
+	if len(qs) == 0 {
+		return []Object{}, 0
+	}
+	first := parse(qs[0]["ts"]).UnixMilli()
+	width := math.Max(1, float64(parse(qs[len(qs)-1]["ts"]).UnixMilli()-first)/150)
+	bins := map[string][]Object{}
+	binOrder := []string{}
+	previous := map[string]Object{}
+	points := map[string]Object{}
+	pointOrder := []string{}
+	put := func(q Object) {
+		id := text(q["id"])
+		if points[id] == nil {
+			pointOrder = append(pointOrder, id)
+		}
+		points[id] = q
+	}
+	for _, q := range qs {
+		k := text(q["account"]) + ":" + text(q["bucket"]) + ":" + text(q["slot"])
+		p := previous[k]
+		minutes := num(q["minutes"])
+		if minutes == 0 {
+			minutes = 300
+		}
+		maxGap := math.Max(60, math.Min(minutes, 360)) * 60000
+		if p != nil && float64(parse(q["ts"]).UnixMilli()-parse(p["ts"]).UnixMilli()) > maxGap {
+			q["gapBefore"] = true
+			put(p)
+			put(q)
+		}
+		previous[k] = q
+		reset := "null"
+		if q["resets"] != nil {
+			reset = text(q["resets"])
+		}
+		key := k + ":" + reset + ":" + fmt.Sprint(math.Floor(float64(parse(q["ts"]).UnixMilli()-first)/width))
+		b := bins[key]
+		if b == nil {
+			b = []Object{q, q, q, q}
+			bins[key] = b
+			binOrder = append(binOrder, key)
+		}
+		b[1] = q
+		if num(q["used"]) < num(b[2]["used"]) {
+			b[2] = q
+		}
+		if num(q["used"]) > num(b[3]["used"]) {
+			b[3] = q
+		}
+	}
+	for _, k := range binOrder {
+		for _, q := range bins[k] {
+			put(q)
+		}
+	}
+	out := []Object{}
+	for _, k := range pointOrder {
+		out = append(out, points[k])
+	}
+	sort.SliceStable(out, func(i, j int) bool { return text(out[i]["ts"]) < text(out[j]["ts"]) })
+	return out, len(qs)
+}
+
+func (s *Store) Export(f Object, now time.Time) (string, error) {
+	f = s.resolve(f)
+	start, end, e := Bounds(f, now)
+	if e != nil {
+		return "", e
+	}
+	conditions := []string{"u.ts>=?", "u.ts<?"}
+	params := []any{iso(start), iso(end)}
+	for _, p := range [][2]string{{"account", "u.account"}, {"model", "u.model"}, {"session", "u.session"}, {"project", "s.project"}, {"recordStatus", "t.status"}} {
+		if truth(f[p[0]]) {
+			conditions = append(conditions, p[1]+"=?")
+			params = append(params, f[p[0]])
+		}
+	}
+	search := strings.ToLower(strings.TrimSpace(text(f["recordSearch"])))
+	if search != "" || truth(f["recordStatus"]) {
+		conditions = append(conditions, "t.started>=?", "t.started<?")
+		params = append(params, iso(start), iso(end))
+	}
+	join := ""
+	if truth(f["project"]) {
+		join = " AND s.project=?"
+		params = append([]any{f["project"]}, params...)
+	}
+	rows := s.mustQuery("SELECT u.*,s.project,t.id record_id,t.session record_session,t.model record_model FROM usage u LEFT JOIN sessions s ON s.id=u.session"+join+" LEFT JOIN turns t ON t.id=u.turn AND t.session=u.session WHERE "+strings.Join(conditions, " AND ")+" ORDER BY u.ts", params...)
+	prices := s.prices()
+	cols := []string{"ts", "model", "session", "turn", "input", "cached", "output", "reasoning", "cache_write", "cost", "saved", "priceId", "kind", "account"}
+	lines := []string{strings.Join(cols, ",")}
+	for _, r := range rows {
+		if !matches(Object{"id": r["record_id"], "session": r["record_session"], "model": r["record_model"]}, r["project"], search) {
+			continue
+		}
+		for k, v := range costOf(r, prices) {
+			r[k] = v
+		}
+		cells := []string{}
+		for _, k := range cols {
+			v := text(r[k])
+			if v != "" && strings.ContainsRune("=+@-\t\r", rune(v[0])) {
+				v = "'" + v
+			}
+			cells = append(cells, "\""+strings.ReplaceAll(v, "\"", "\"\"")+"\"")
+		}
+		lines = append(lines, strings.Join(cells, ","))
+	}
+	return "\uFEFF" + strings.Join(lines, "\r\n"), nil
+}

@@ -11,13 +11,6 @@ function readState(data) {
   try { return JSON.parse(fs.readFileSync(path.join(data, 'widget-window.json'), 'utf8')); } catch { return {}; }
 }
 
-// The persisted state file belongs to this module; both bootstraps — main.cjs's
-// widgetMode check before any window exists and createWidget's full state — go
-// through it, so the mode key has a single owner.
-function savedWidgetMode(data) {
-  return readState(data).mode === true;
-}
-
 function createWidget({ data, restore, refresh }) {
   const file = path.join(data, 'widget-window.json');
   let saved = readState(data);
@@ -135,4 +128,4 @@ function createWidget({ data, restore, refresh }) {
     ]).popup({ window });
   } };
 }
-module.exports = { createWidget, savedWidgetMode };
+module.exports = { createWidget };

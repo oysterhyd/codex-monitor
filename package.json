@@ -4,45 +4,23 @@
   "description": "Local Windows Codex desktop usage monitor",
   "private": true,
   "author": "Codex Monitor",
-  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "start": "npm run build && electron .",
-    "build": "vite build",
-    "package": "npm run build && electron-builder --win nsis --x64"
-  },
-  "build": {
-    "appId": "local.codex.monitor",
-    "productName": "Codex Monitor",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "package.json",
-      "assets/icon.ico",
-      "assets/icon.png",
-      "assets/monitor-glass.png"
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico",
-      "signExecutable": false
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "artifactName": "Codex-Monitor-Setup-${version}.${ext}"
-    }
+    "start": "node scripts/native.cjs start",
+    "build": "node scripts/native.cjs build",
+    "widget:build": "vite build",
+    "widget:check": "npm run widget:build && node scripts/widget-check.cjs",
+    "test": "node scripts/native.cjs test && node --test tests/*.test.cjs",
+    "test:ui": "npm run native:check && npm run widget:check",
+    "native:start": "node scripts/native.cjs start",
+    "native:build": "node scripts/native.cjs build",
+    "native:test": "node scripts/native.cjs test",
+    "native:check": "node scripts/native-check.cjs"
   },
   "devDependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^44.2.0",
-    "electron-builder": "^26.15.3",
     "playwright-core": "^1.63.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

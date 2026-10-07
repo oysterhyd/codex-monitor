@@ -1,111 +1,170 @@
+<a id="top"></a>
+
 <div align="center">
-  <img src="assets/monitor-glass.png" width="112" alt="Codex Monitor" />
+  <img src="assets/monitor-glass.png" alt="Codex Monitor" width="104" />
   <h1>Codex Monitor</h1>
-  <p><b>Windows desktop app for monitoring local Codex usage and quotas</b></p>
-  <p>Token usage · Activity heatmap · Task records · 5h / weekly quotas · Glass interface and desktop widget</p>
+  <p><strong>本机 Codex 用量与额度，一眼看清。</strong></p>
+  <p>Token 消耗 · 活动日历 · 任务记录 · 5h / 每周额度 · 桌面小窗口</p>
   <p>
-    <a href="https://github.com/oysterhyd/codex-monitor/releases/latest"><img src="https://img.shields.io/github/v/release/oysterhyd/codex-monitor" alt="Release" /></a>
-    <a href="https://github.com/oysterhyd/codex-monitor/releases/latest"><img src="https://img.shields.io/badge/platform-Windows%20x64-0069c4" alt="Platform" /></a>
+    <img src="https://img.shields.io/badge/Windows-x64-1671ff?logo=windows" alt="Windows x64" />
+    <a href="https://mygo.egoist.dev/docs"><img src="https://img.shields.io/badge/UI-MyGO_native-008f80" alt="MyGO native UI" /></a>
+    <img src="https://img.shields.io/badge/Data-Go_%2B_SQLite-007d9c?logo=go&logoColor=white" alt="Go and SQLite" />
+    <img src="https://img.shields.io/badge/语言-简体中文_%2F_English-526783" alt="简体中文与 English" />
   </p>
-  <p>简体中文 / English</p>
+  <p>
+    <a href="#功能">功能</a> ·
+    <a href="#界面预览">界面预览</a> ·
+    <a href="#快速开始">快速开始</a> ·
+    <a href="#开发与构建">开发与构建</a> ·
+    <a href="#指标口径">指标口径</a> ·
+    <a href="#数据与隐私">数据与隐私</a> ·
+    <a href="docs/architecture.md">架构说明</a>
+  </p>
 </div>
 
 <p align="center">
-  <img src="assets/screenshots/app-overview.png" alt="Usage overview" />
+  <img src="assets/readme/cover.png" alt="Codex Monitor 原生主窗口与透明桌面小窗口展示图" width="1120" />
 </p>
-<p align="center"><small>The overview and activity previews use demonstration data.</small></p>
+
+<p align="center"><sub>封面基于当前界面截图制作；截图使用演示数据。原始界面预览见下方。</sub></p>
+
+<a id="功能"></a>
+
+## 功能
+
+Codex Monitor 是 Windows x64 本机监测工具。主窗口使用 **MyGO native UI**；日志采集、账号归属、统计、价格和 SQLite 数据层全部运行在 **Go** 中。透明小窗口保留原有 Electron / React 界面，共用 Go 服务。
+
+| 页面 / 模式 | 能看到什么 |
+| --- | --- |
+| 用量总览 | Token、请求次数、缓存命中率、费用估算、使用趋势及模型 / 项目排行 |
+| 活动日历 | 年度热力图、活跃天数、连续活动、小时分布与单日详情 |
+| 历史分析 | 任务记录、模型 / 项目 / 会话筛选、搜索、分页、明细与 CSV 导出 |
+| 账户额度 | 当前 Codex 账号的 5h / 每周额度、重置时间和离散采样曲线 |
+| 设置与价格 | 中英文、主题、提醒、开机启动、账号名称与价格版本 |
+| 桌面小窗口 | 玻璃卡片与 Token 圆球、拖动、置顶、用量趋势和位置恢复 |
+
+支持今日、近 7 天、近 30 天、全部和自定义时间范围。标准 Windows 标题栏保留拖动、缩放、最小化和最大化；关闭窗口后继续在托盘采集，完全退出请使用托盘菜单。
+
+页面、筛选、数字和图表具有过渡反馈，小窗口保留卡片 / 圆球动画与鼠标高光。两种界面均遵循系统减少动态效果设置。
+
+| 快捷键 | 操作 |
+| --- | --- |
+| `Ctrl+K` | 打开命令面板 |
+| `Alt+1`–`Alt+5` | 切换五个页面 |
+| `Ctrl+R` | 刷新 |
+| `Ctrl+E` | 导出当前筛选 |
+
+<a id="界面预览"></a>
+
+## 界面预览
+
+下面是当前版本实际绘制的界面，均使用合成演示数据。
+
+<details>
+<summary><strong>原生主窗口 · 用量总览</strong></summary>
+
 <p align="center">
-  <img src="assets/screenshots/desktop-widget.png" width="380" alt="Desktop widget" />
+  <img src="assets/readme/overview.png" alt="MyGO 原生主窗口：用量指标、活动热力图和趋势图" width="1120" />
 </p>
 
-## Download
+</details>
 
-[Download for Windows x64](https://github.com/oysterhyd/codex-monitor/releases/latest)
+<p align="center">
+  <img src="assets/readme/widget.png" alt="透明桌面小窗口：5h 与周额度、实时 TPS、缓存命中率和今日 Token" width="560" />
+</p>
 
-Run the `Codex-Monitor-Setup-*.exe` installer. It installs per-user (no admin rights) and can upgrade an existing copy. Closing the window keeps monitoring active in the system tray; use **Quit / 退出** to exit fully.
+小窗口用量汇总本机全部账号，额度仅显示当前 Codex 账号。点击右上角三点收起为圆球，点击圆球展开；右键可设置置顶，双击标题或点击标志返回主窗口。
 
-The installer is unsigned. Automatic updates and cross-device synchronization are not included.
+<a id="快速开始"></a>
 
-## Features
+## 快速开始
 
-### Overview
-Token usage, API-equivalent estimated cost, cache hit rate, remaining quota, model distribution, and output speed. Time ranges: today / last 7 days / last 30 days / all / custom, filterable by model, project, task, and account. Custom dates apply on confirmation, active filters appear as removable chips, and the trend switches between total tokens, output, and USD. Chart samples can be inspected with the keyboard.
+当前 native 版本以源码构建的完整运行目录提供，尚未发布 native 安装包。
 
-### Activity calendar
-A yearly heatmap of real local usage, with year selection and token / usage-record / USD views. Explore active days, current and longest streaks, hourly activity, and recent active dates. Select a day to inspect its totals and open that day's task records. Account, model, and project filters apply to the calendar, and CSV export covers the selected year. Future dates are disabled and unpriced costs remain unknown.
-
-![Activity calendar, demonstration data](assets/screenshots/activity-calendar.png)
-
-### History
-Search and sort usage breakdowns by model, project, and task. Task records support task / project / model search, status filters, newest / oldest order, pagination, and expandable per-model token and cost details. CSV export follows record search and status filters, including literal special characters and international project names. Formula-like CSV values are escaped.
-
-### Quota
-Current-account 5h and weekly quota windows: remaining percentage, reset time, update time, and a step-chart history that preserves real sample boundaries and stays broken across resets.
-
-### Pi agent Codex usage
-Automatically imports historical and new token usage from Pi agent sessions for both the legacy official Codex provider (`openai-codex`) and newer **Sign in with ChatGPT** subscription OAuth under `openai` / `openai-responses`. The new path requires local official direct-token OAuth metadata (`chatgpt.tokens.use.direct`); API-key configurations, custom proxies, and third-party providers are excluded. Cache reads/writes are included in total input; reasoning tokens are not counted twice. Re-scans, restarts, forks, and clones are deduplicated. Clearing monitor history does not modify the original files or re-import old usage.
-
-Pi and Codex Desktop logins are observed independently: matching verified accounts share statistics, different accounts stay isolated, and usage without a verifiable account remains **Unassigned** (visible under **All accounts**). New OAuth tokens may encrypt account metadata; the app does not guess a desktop-account mapping. Quota percentages still come from Codex App Server rather than a token-based estimate.
-
-**中文：** 支持 pi agent 旧版 `openai-codex` 和新版 `openai` 官方订阅 OAuth 登录，自动补录历史与采集新增记录；当前 API Key、代理配置和其他供应商不采集。升级后重新扫描此前读过的 pi 文件，保留去重与清空边界。无法解析账号信息的记录保留为「未归属」，可在「全部账号」查看。
-
-### Settings
-Settings are grouped into General, Accounts, Model pricing, and Data & storage. Switch Chinese/English instantly, choose system / light / dark appearance, configure launch at sign-in and quota alerts, inspect data locations, and manage account names. Model prices retain effective dates and support adding, editing, and deleting manual versions.
-
-### Interaction and shortcuts
-The glass gradients and top navigation remain, with a compact metric strip, clearer grouping, and motion for navigation, filters, charts, value changes, expanded details, and notifications. System reduced-motion settings are respected. `Ctrl+K` opens the command palette to find pages, models, or projects; `Alt+1`–`Alt+5` switch pages, `Ctrl+R` refreshes, and `Ctrl+E` exports. Visible windows receive collection updates immediately, and the interface can reload independently after a rendering failure.
-
-### Desktop widget
-- Left-click the top-right dots to smoothly collapse the 560×380 card into a today-token orb; click the orb to expand. Right-click opens options.
-- Pointer-following highlights, gentle card tilt, hover elevation, and press feedback bring the glass surface to life.
-- A top-bar switch toggles between the main window and the glass desktop card; the tray menu offers the same checkbox.
-- Today's tokens in both the card and collapsed orb cover **all local accounts, including unassigned Pi usage**, matching the dashboard's **Today / All accounts** view. Yesterday comparison, live TPS, cache hit rate, and the 24-hour trend use the same scope. 5h / weekly quota remains scoped to the current Codex account. The widget labels its usage scope and never rewrites account attribution.
-- Pinned above other windows by default; unpin from the card menu at any time.
-- In widget mode the card owns the taskbar slot, so the taskbar always offers an entry point; clicking it summons the widget.
-- Drag to move, double-click the header to return. Mode, position, and pin state persist locally across restarts.
-- Smooth enter/exit transitions respect the system reduced-motion setting. The translucent glass look is a Windows/CSS approximation, not Apple's native material.
-
-### Tray and background
-Closing the window keeps incremental collection running in the tray with open / refresh / mute / quit actions. Windows notifications fire at 20% and 10% remaining quota (once per cycle and threshold); launch at sign-in is optional and starts silently.
-
-## How it works
-
-- Read-only scanning of `%CODEX_HOME%` (default `%USERPROFILE%\.codex`) `sessions/` and `archived_sessions/`. Only `originator === "Codex Desktop"` records are counted (including desktop subagents); CLI and IDE-extension sessions are excluded.
-- Also scans Pi sessions read-only, defaulting to `%USERPROFILE%\.pi\agent\sessions`. Legacy `openai-codex` / `openai-codex-responses` and verified subscription OAuth `openai` / `openai-responses` responses are supported, along with `usage` entries with an explicit provider/model. Summary usage without verifiable provider attribution is excluded.
-- Newer Pi `openai` logs do not persist each request's authentication method. Historical source recognition uses the current local subscription OAuth configuration, not independent per-request proof; if the same provider was used with API keys before, interpret historical totals accordingly. Parser upgrades replay consumed Pi files while preserving response deduplication and clear-history boundaries.
-- Pi directories can be overridden with `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`, or monitor-specific `MONITOR_PI_HOME` / `MONITOR_PI_SESSIONS`. For Pi's `--session-dir`, set `MONITOR_PI_SESSIONS` to that directory. Unsaved `--no-session` usage cannot be collected. The configured path and OpenAI subscription OAuth detection status are shown in **Settings → Data & storage**.
-- New-format usage records are deduplicated by `response_id`; legacy `token_count` snapshots use cumulative differencing.
-- Quotas are read through the local Codex app-server (`account/rateLimits/read`) — no model requests are created and no Codex files are modified.
-- Recent files are scanned every 3 seconds and all directories re-checked every 60 seconds; the quota query interval is configurable between 60–300 seconds.
-- Statistics live in `%APPDATA%\codex-monitor\monitor.sqlite`, managed by a background worker with automatic recovery; a corrupt database is backed up and rebuilt while readable settings and prices are kept.
-
-## Metrics and privacy
-
-- Quota belongs to the currently signed-in account and may include usage from other devices. Token statistics cover locally available Codex Desktop and identifiable official Codex usage in Pi.
-- Cache hit rate = cached input tokens ÷ input tokens (token-weighted); no fake 0% is shown when there is no input.
-- API-equivalent cost is an estimate using Standard short-context API rates — not a subscription bill. Fast, long-context, and regional adjustments are not recognized; default prices ship for major models, other models can be priced manually as new versions.
-- Live TPS divides output tokens recorded in the last 60 seconds by 60, including idle time; it is not exact generation throughput. History shows the per-task average output rate.
-- Only statistical metadata is persisted; message and tool bodies are never stored. Pi candidate messages are parsed transiently because usage fields follow assistant content. Credentials stay local. Accounts are identified by a SHA-256 digest of the login user and account pair — no passwords, tokens, or API keys are saved.
-- All data stays on the local computer. No telemetry, no sync. Clearing history keeps prices and settings.
-
-## Build from source
-
-Requires Windows, Node.js 22.19+ with `node:sqlite` support, npm, and a local Codex installation for live data.
+需要 **Windows x64、Go 1.27.1、Node.js 22.19+ 和 npm**。实时数据需要本机已有 Codex 安装及登录状态。
 
 ```powershell
+git clone https://github.com/oysterhyd/codex-monitor.git
+cd codex-monitor
 npm ci
-npm run build
 npm start
-npm run package
 ```
 
-Built installers are written to `release/` and include only runtime assets, not documentation screenshots or local test files. Browser-only development (`npm run dev`) previews the shell without connecting to local account data.
+`npm start` 会构建并启动当前 native 版本。首次启动读取本机日志，随后增量更新；无需输入 API Key。
 
-## Stack
+只构建运行目录：
 
-Electron 44 · React 19 · Vite 8 · SQLite (node:sqlite) · Phosphor Icons
+```powershell
+npm run build
+```
 
-## Reference
+产物位于 `build/native/`，入口为 `Codex Monitor Native.exe`。**分发时复制整个目录**，保留 `widget/` 与 `icon.ico`；运行无需另装 Node.js，小窗口使用随包提供的 Electron 运行时。
 
-- [Codex App Server protocol](https://learn.chatgpt.com/docs/app-server)
-- [OpenAI API pricing](https://developers.openai.com/api/docs/pricing)
+可将完整目录放到 `%LOCALAPPDATA%\Programs\Codex Monitor`，为 native 可执行文件创建桌面或开始菜单快捷方式。更新前先从托盘完全退出，用户数据保存在独立目录。
+
+<a id="开发与构建"></a>
+
+## 开发与构建
+
+Go 可通过 PATH 查找，也支持 `%LOCALAPPDATA%\Programs\go\bin\go.exe` 或 `GO_EXE`。
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm start` | 构建并启动 native 应用 |
+| `npm run build` | 构建完整 native 运行目录 |
+| `npm test` | Go 数据 / 界面测试与小窗口刷新测试 |
+| `npm run native:check` | 五页、过渡帧、窗口控制与小窗口通信验收 |
+| `npm run widget:check` | 真实小窗口布局、圆球动画、拖动和错误状态验收 |
+| `npm run test:ui` | 执行两项 UI 验收 |
+| `npm run widget:build` | 仅构建小窗口前端 |
+| `npm run dev` | 小窗口 Vite 调试页面；数据需要 Electron bridge |
+
+测试使用 Go 生成的合成数据和临时目录。`artifacts/`、`build/`、`dist/`、依赖和数据库均被 Git 忽略；源码结构见 [架构说明](docs/architecture.md)。
+
+<a id="指标口径"></a>
+
+## 指标口径
+
+- **用量来源**：只读扫描 `%CODEX_HOME%`（默认 `%USERPROFILE%\.codex`）的 `sessions/` 与 `archived_sessions/`，仅计入 `Codex Desktop` 来源。新版按响应 ID 去重，旧累计记录采用差分。
+- **pi 来源**：支持可识别的官方 Codex 登录来源。默认读取 `%USERPROFILE%\.pi\agent\sessions`，兼容 `openai-codex`，以及能通过当前本机官方 OAuth 配置识别的 `openai`。未知账号保持未归属；混用登录方式的历史日志需结合实际情况判断。
+- **额度**：通过本机 Codex app-server 的 `account/rateLimits/read` 查询，属于当前账号，可能包括其他设备的用量。曲线在重置和采样空档处断开。
+- **缓存命中率**：缓存输入 / 输入 Token；没有输入时保持未知。
+- **实时 TPS**：最近 60 秒日志中的输出 Token / 60，包含等待时间。
+- **费用**：按生效时间选择价格版本，显示 API 等值 USD 估算；不是订阅实付账单，未定价记录会明确标注。
+
+近期日志每 3 秒增量扫描，全部目录每 60 秒校验；额度查询间隔可设为 60 / 120 / 300 秒。
+
+<a id="数据与隐私"></a>
+
+## 数据与隐私
+
+统计和设置默认保存在 `%APPDATA%\codex-monitor`，不写入 Codex / pi 原始文件。不保存对话正文、工具调用、认证 token 或 API key；账号使用身份字段的 SHA-256 摘要。无遥测、无跨设备同步，不创建模型请求。
+
+| 文件 / 目录 | 用途 |
+| --- | --- |
+| `monitor.sqlite` | Go 服务的统计、价格、账号和设置 |
+| `monitor.sqlite-wal` / `monitor.sqlite-shm` | SQLite 运行文件 |
+| `monitor-owner.json` | 数据库单进程所有权锁 |
+| `widget-window.json` | 小窗口的位置、置顶和模式 |
+| `native-shell/` | MyGO 窗口状态 |
+
+已有数据库先以只读方式检查完整性，失败时显示启动错误并拒绝写入。清空历史保留价格和设置，并设置日志重放边界。
+
+<details>
+<summary>自定义目录与隔离运行</summary>
+
+- `--data` / `MONITOR_TEST_DATA`：监测数据目录。
+- `--home` / `MONITOR_CODEX_HOME`：Codex 来源目录。
+- `--offline`：禁止自动扫描和额度查询。
+- `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`：pi 目录。
+- `MONITOR_PI_HOME` / `MONITOR_PI_SESSIONS`：监测专用 pi 目录覆盖。
+
+</details>
+
+## 参考
+
+- [MyGO 文档](https://mygo.egoist.dev/docs)
+- [Codex App Server 协议](https://learn.chatgpt.com/docs/app-server)
+- [OpenAI API 价格](https://developers.openai.com/api/docs/pricing)
+
+<p align="center"><a href="#top">返回顶部 ↑</a></p>
