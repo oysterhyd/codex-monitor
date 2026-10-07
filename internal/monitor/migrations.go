@@ -3,7 +3,7 @@ package monitor
 import "fmt"
 
 const schemaVersion = 2
-const codexParserVersion = 1
+const codexParserVersion = 2
 const piParserVersion = 2
 
 func (s *Store) checkSchemaVersion() error {

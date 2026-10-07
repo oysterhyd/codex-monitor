@@ -15,6 +15,8 @@ func TestCLIIdentitiesModernAndLegacyUsage(t *testing.T) {
 		{"originator": "Codex CLI"}, {"originator": "codex_cli_rs"},
 		{"originator": "codex-tui"}, {"originator": "codex_exec"},
 		{"source": "cli"}, {"source": "exec"},
+		{"originator": "monocode", "source": "vscode"},
+		{"originator": "monocode-text", "source": "vscode"},
 	} {
 		t.Run(jsonText(meta), func(t *testing.T) {
 			s := testStore(t)
@@ -69,7 +71,11 @@ func TestCLIIdentitiesModernAndLegacyUsage(t *testing.T) {
 }
 
 func cliLog(id, origin, created string, stamps ...string) []byte {
-	lines := []string{jsonText(Object{"type": "session_meta", "timestamp": created, "payload": Object{"id": id, "originator": origin, "cwd": "project"}})}
+	meta := Object{"id": id, "originator": origin, "cwd": "project"}
+	if origin == "monocode" || origin == "monocode-text" {
+		meta["source"] = "vscode"
+	}
+	lines := []string{jsonText(Object{"type": "session_meta", "timestamp": created, "payload": meta})}
 	for i, ts := range stamps {
 		lines = append(lines, jsonText(Object{"type": "event_msg", "timestamp": ts, "payload": Object{"type": "token_count", "info": Object{"total_token_usage": Object{"input_tokens": (i + 1) * 100, "cached_input_tokens": (i + 1) * 50, "output_tokens": (i + 1) * 20, "total_tokens": (i + 1) * 120}}}}))
 	}
@@ -88,7 +94,8 @@ func TestUpgradeReplaysIgnoredCLIAndPreservesDesktopAndClearBoundary(t *testing.
 	if err := s.set("settings", Object{"clearedAt": stamps[1]}); err != nil {
 		t.Fatal(err)
 	}
-	for _, origin := range []string{"Codex Desktop", "codex_cli_rs", "codex_exec"} {
+	origins := []string{"Codex Desktop", "codex_cli_rs", "codex_exec", "monocode", "monocode-text"}
+	for _, origin := range origins {
 		file := filepath.Join(dir, origin+".jsonl")
 		data := cliLog(origin, origin, created, stamps...)
 		if err := os.WriteFile(file, data, 0600); err != nil {
@@ -110,8 +117,12 @@ func TestUpgradeReplaysIgnoredCLIAndPreservesDesktopAndClearBoundary(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The v2.6.2 cache already consumed the complete unchanged log.
-		if err := s.exec("INSERT INTO files(path,offset,state,mtime) VALUES(?,?,?,?)", file, len(data), jsonText(Object{"session": origin, "desktop": origin == "Codex Desktop"}), float64(info.ModTime().UnixNano())/1e6); err != nil {
+		// v2.6.2 and v2.7.0 consumed these complete, unchanged logs.
+		version := 0
+		if strings.HasPrefix(origin, "monocode") {
+			version = 1
+		}
+		if err := s.exec("INSERT INTO files(path,offset,state,mtime,parser_version) VALUES(?,?,?,?,?)", file, len(data), jsonText(Object{"session": origin, "desktop": origin == "Codex Desktop", "source": ""}), float64(info.ModTime().UnixNano())/1e6, version); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -120,11 +131,11 @@ func TestUpgradeReplaysIgnoredCLIAndPreservesDesktopAndClearBoundary(t *testing.
 			t.Fatal(err)
 		}
 		row := s.mustOne("SELECT COUNT(*) n,SUM(input) input,SUM(output) output,MIN(ts) first FROM usage")
-		if num(row["n"]) != 3 || num(row["input"]) != 300 || num(row["output"]) != 60 || row["first"] != stamps[2] {
+		if num(row["n"]) != float64(len(origins)) || num(row["input"]) != float64(len(origins)*100) || num(row["output"]) != float64(len(origins)*20) || row["first"] != stamps[2] {
 			t.Fatal("replay lost or duplicated usage", row)
 		}
 	}
-	if num(s.mustOne("SELECT COUNT(*) n FROM files WHERE parser_version=?", codexParserVersion)["n"]) != 3 {
+	if num(s.mustOne("SELECT COUNT(*) n FROM files WHERE parser_version=?", codexParserVersion)["n"]) != float64(len(origins)) {
 		t.Fatal("parser version not committed")
 	}
 	// Incremental appends work after replay, including a formerly ignored file.
@@ -141,10 +152,10 @@ func TestUpgradeReplaysIgnoredCLIAndPreservesDesktopAndClearBoundary(t *testing.
 	if _, err = s.Scan(context.Background(), home, "", "", true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if num(s.mustOne("SELECT SUM(input) n FROM usage")["n"]) != 400 {
+	if num(s.mustOne("SELECT SUM(input) n FROM usage")["n"]) != float64((len(origins)+1)*100) {
 		t.Fatal("append missed")
 	}
-	if num(s.Widget(parse("2026-10-07T00:00:05Z"))["total"]) != 480 {
+	if num(s.Widget(parse("2026-10-07T00:00:05Z"))["total"]) != float64((len(origins)+1)*120) {
 		t.Fatal("widget missed CLI")
 	}
 }

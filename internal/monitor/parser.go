@@ -10,7 +10,7 @@ func codexSource(meta Object) string {
 	switch text(meta["originator"]) {
 	case "Codex Desktop", "codex_work_desktop", "codex_desktop":
 		return "desktop"
-	case "Codex CLI", "codex_cli_rs", "codex-tui", "codex-cli", "codex_exec":
+	case "Codex CLI", "codex_cli_rs", "codex-tui", "codex-cli", "codex_exec", "monocode", "monocode-text":
 		return "cli"
 	}
 	switch text(meta["source"]) {

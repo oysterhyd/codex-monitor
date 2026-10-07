@@ -1,5 +1,10 @@
 # 更新记录
 
+## 2.7.1
+
+- 修复 MonoCode 用量缺失：识别 `monocode` 和 `monocode-text` 客户端，即使日志的 `source` 为 `vscode` 也计入 CLI 用量。
+- 提升 Codex 日志解析版本，自动重读 2.7.0 已扫描但忽略的 MonoCode 文件，补采历史用量，保留去重和清空历史边界。
+
 ## 2.7.0
 
 - 新增 Codex CLI 用量统计，兼容交互终端与 codex exec 的来源标识，计入 Token、缓存、费用估算、活动日历和任务记录。
