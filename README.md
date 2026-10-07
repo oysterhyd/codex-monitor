@@ -6,12 +6,14 @@
   <p><strong>本机 Codex 用量与额度，一眼看清。</strong></p>
   <p>Token 消耗 · 活动日历 · 任务记录 · 5h / 每周额度 · 桌面小窗口</p>
   <p>
+    <a href="https://github.com/oysterhyd/codex-monitor/releases/latest"><img src="https://img.shields.io/github/v/release/oysterhyd/codex-monitor" alt="最新版本" /></a>
     <img src="https://img.shields.io/badge/Windows-x64-1671ff?logo=windows" alt="Windows x64" />
     <a href="https://mygo.egoist.dev/docs"><img src="https://img.shields.io/badge/UI-MyGO_native-008f80" alt="MyGO native UI" /></a>
     <img src="https://img.shields.io/badge/Data-Go_%2B_SQLite-007d9c?logo=go&logoColor=white" alt="Go and SQLite" />
     <img src="https://img.shields.io/badge/语言-简体中文_%2F_English-526783" alt="简体中文与 English" />
   </p>
   <p>
+    <a href="https://github.com/oysterhyd/codex-monitor/releases/latest">下载</a> ·
     <a href="#功能">功能</a> ·
     <a href="#界面预览">界面预览</a> ·
     <a href="#快速开始">快速开始</a> ·
@@ -79,7 +81,14 @@ Codex Monitor 是 Windows x64 本机监测工具。主窗口使用 **MyGO native
 
 ## 快速开始
 
-当前 native 版本以源码构建的完整运行目录提供，尚未发布 native 安装包。
+[下载 Windows x64 安装包](https://github.com/oysterhyd/codex-monitor/releases/download/v2.5.0/Codex-Monitor-Setup-2.5.0.exe) · [版本说明与 SHA-256 校验](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.5.0)
+
+运行 `Codex-Monitor-Setup-2.5.0.exe`，按向导选择安装目录。默认安装到 `%LOCALAPPDATA%\Programs\Codex Monitor`，无需管理员权限，并创建桌面和开始菜单快捷方式。
+
+安装包包含 native 主程序和小窗口运行时，使用时无需安装 Go 或 Node.js。实时数据需要本机已有 Codex 安装及登录状态。更新前请从托盘完全退出应用；安装和卸载均保留 `%APPDATA%\codex-monitor` 中的统计与设置。
+
+<details>
+<summary><strong>从源码运行或构建便携目录</strong></summary>
 
 需要 **Windows x64、Go 1.27.1、Node.js 22.19+ 和 npm**。实时数据需要本机已有 Codex 安装及登录状态。
 
@@ -102,6 +111,8 @@ npm run build
 
 可将完整目录放到 `%LOCALAPPDATA%\Programs\Codex Monitor`，为 native 可执行文件创建桌面或开始菜单快捷方式。更新前先从托盘完全退出，用户数据保存在独立目录。
 
+</details>
+
 <a id="开发与构建"></a>
 
 ## 开发与构建
@@ -112,6 +123,8 @@ Go 可通过 PATH 查找，也支持 `%LOCALAPPDATA%\Programs\go\bin\go.exe` 或
 | --- | --- |
 | `npm start` | 构建并启动 native 应用 |
 | `npm run build` | 构建完整 native 运行目录 |
+| `npm run package` | 构建 native NSIS 安装包及 SHA-256 校验文件 |
+| `npm run package:check` | 隔离验证安装、升级、快捷方式、注册信息和卸载 |
 | `npm test` | Go 数据 / 界面测试与小窗口刷新测试 |
 | `npm run native:check` | 五页、过渡帧、窗口控制与小窗口通信验收 |
 | `npm run widget:check` | 真实小窗口布局、圆球动画、拖动和错误状态验收 |
@@ -120,6 +133,8 @@ Go 可通过 PATH 查找，也支持 `%LOCALAPPDATA%\Programs\go\bin\go.exe` 或
 | `npm run dev` | 小窗口 Vite 调试页面；数据需要 Electron bridge |
 
 测试使用 Go 生成的合成数据和临时目录。`artifacts/`、`build/`、`dist/`、依赖和数据库均被 Git 忽略；源码结构见 [架构说明](docs/architecture.md)。
+
+制作安装包另需 **NSIS 3 与 Unicode nsProcess 插件**。可使用 PATH 中的 `makensis.exe`，或通过 `MAKENSIS` / `NSIS_PLUGIN_DIR` 指定编译器与插件目录；脚本也会识别已有 electron-builder 的 NSIS 缓存。产物为 `release/Codex-Monitor-Setup-<版本>.exe` 和 `SHA256SUMS-<版本>.txt`，打包不依赖 electron-builder。
 
 <a id="指标口径"></a>
 

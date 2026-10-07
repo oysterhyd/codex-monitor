@@ -42,6 +42,10 @@ MyGO 页面直接调用 Go 服务获取按页面裁剪的快照。小窗口通�
 
 `npm run build` 先构建小窗口，再生成 Go 可执行文件，并复制小窗口源码、前端资源和 Electron runtime 到 `build/native/widget/`。分发整个 `build/native/`，即可在没有 Node.js 开发环境的机器运行。
 
+`npm run package` 使用 NSIS 打包此完整目录，生成 `release/` 下的安装包和 SHA-256 校验文件。`scripts/installer.nsi` 按当前用户安装，创建快捷方式与 Windows 卸载记录；运行中的应用必须从托盘退出后才能更新。旧版 Electron 主程序与已知运行文件会在原目录升级时清理，用户数据目录始终保留。卸载按生成的文件清单删除程序文件，仅移除空目录，保留用户额外添加的文件。
+
+`npm run package:check` 在独立安装目录、快捷方式和注册表项下验证逐文件哈希、已安装 Go 服务、重复安装和卸载，不覆盖本机在用的应用。
+
 `npm test` 验证 Go 服务所有权、串行写入、清空边界、解析去重、价格、账号筛选、CSV、小窗口口径、native 页面和动画。`npm run native:check` 实际启动原生窗口，验收五页、过渡帧、拖动 / 缩放 / 最小化 / 最大化 / 关闭到托盘及小窗口通信；`npm run widget:check` 使用 Go 服务驱动真实小窗口，验收样式、圆球动画、拖动、减少动态效果、英文、额度过期和错误状态。
 
 验收使用临时合成数据库，结束后移除。截图和报告保存在被 Git 忽略的 `artifacts/`。不需要旧版代码、旧数据库或备份副本。

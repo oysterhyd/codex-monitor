@@ -1,6 +1,6 @@
 {
   "name": "codex-monitor",
-  "version": "2.4.2",
+  "version": "2.5.0",
   "description": "Local Windows Codex desktop usage monitor",
   "private": true,
   "author": "Codex Monitor",
@@ -8,6 +8,8 @@
     "dev": "vite --host 127.0.0.1",
     "start": "node scripts/native.cjs start",
     "build": "node scripts/native.cjs build",
+    "package": "node scripts/package.cjs",
+    "package:check": "node scripts/installer-check.cjs",
     "widget:build": "vite build",
     "widget:check": "npm run widget:build && node scripts/widget-check.cjs",
     "test": "node scripts/native.cjs test && node --test tests/*.test.cjs",

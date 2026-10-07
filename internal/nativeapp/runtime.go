@@ -124,7 +124,7 @@ func Run(resources fs.FS) error {
 	if o.Offline || (os.Getenv("MONITOR_TEST_DATA") != "" && os.Getenv("MONITOR_PI_HOME") == "") {
 		piHome, piSessions = "", ""
 	}
-	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, Offline: o.Offline, Version: "2.4.2"})
+	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, Offline: o.Offline, Version: "2.5.0"})
 	if err != nil {
 		if o.Snapshot == "" && !o.Stdio {
 			mygo.App.WhenReady(func() {

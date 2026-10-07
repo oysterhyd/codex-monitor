@@ -10,6 +10,8 @@ Use PowerShell 7. Install Node dependencies with `npm ci`; Go 1.27.1 is required
 
 - `npm start`: build and launch the native app.
 - `npm run build`: produce the complete portable app under build/native.
+- `npm run package`: build the native NSIS installer and SHA-256 checksum under release; requires NSIS 3 and the Unicode nsProcess plugin (MAKENSIS / NSIS_PLUGIN_DIR or existing cache).
+- `npm run package:check`: isolated installer acceptance for file hashes, shortcuts, registry, the installed service, upgrades and uninstall; run after package.
 - `npm test`: Go tests plus the widget refresh test.
 - `npm run native:check`: isolated native-window acceptance, including five pages, motion, window controls and widget transport.
 - `npm run widget:check`: isolated real Electron widget acceptance, using the Go service.
@@ -37,3 +39,5 @@ Do not write Codex/Pi source files or persist message bodies, tool calls, tokens
 Renderer sandbox, context isolation and sender validation must remain enabled. Do not broaden the widget preload API. The widget must never open SQLite. Quota charts are discrete step observations and break at resets/gaps. Preserve the fixed 560x380 widget bounds and its existing animation/drag behavior. Respect reduced motion in both interfaces.
 
 All tests must use synthetic temporary profiles. Keep build, dist, artifacts and databases out of Git. Retain .git; do not push or publish without authorization.
+
+scripts/installer.nsi packages only the current native bundle. Install per-user, refuse updates while the app is running, and preserve the user profile. Generate uninstall commands from shipped files; never recursively remove an arbitrary installation directory. Installer acceptance uses a separate app name, executable and uninstall key so the installed application stays untouched.
