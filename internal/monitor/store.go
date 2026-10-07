@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	_ "modernc.org/sqlite"
@@ -17,6 +18,8 @@ import (
 )
 
 type Object = map[string]any
+
+var ErrDatabaseIntegrity = errors.New("监测数据库完整性检查失败")
 
 const Unknown = "unassigned"
 const UnassignedProject = "未归属项目"
@@ -179,7 +182,7 @@ func checkExistingDatabase(file string) error {
 	defer db.Close()
 	rows, e := db.Query("PRAGMA quick_check")
 	if e != nil {
-		return fmt.Errorf("监测数据库完整性检查失败：%w", e)
+		return fmt.Errorf("%w：%w", ErrDatabaseIntegrity, e)
 	}
 	defer rows.Close()
 	count := 0
@@ -189,15 +192,15 @@ func checkExistingDatabase(file string) error {
 			return e
 		}
 		if result != "ok" {
-			return fmt.Errorf("监测数据库完整性检查失败")
+			return fmt.Errorf("%w：%s", ErrDatabaseIntegrity, result)
 		}
 		count++
 	}
 	if e = rows.Err(); e != nil {
-		return fmt.Errorf("监测数据库完整性检查失败：%w", e)
+		return fmt.Errorf("%w：%w", ErrDatabaseIntegrity, e)
 	}
 	if count != 1 {
-		return fmt.Errorf("监测数据库完整性检查失败")
+		return fmt.Errorf("%w：检查未返回有效结果", ErrDatabaseIntegrity)
 	}
 	return nil
 }

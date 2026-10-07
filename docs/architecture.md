@@ -13,6 +13,7 @@
 | `src/`、`index.html`、`vite.config.mjs` | 小窗口前端，独立样式和入口 |
 | `assets/locales/` | native UI 与系统元数据翻译 |
 | `internal/testfixture/`、`cmd/fixture/` | 隔离验收的合成统计数据 |
+| `cmd/repair/` | 从源码将损坏数据库恢复到新文件，不覆盖原库 |
 | `scripts/`、`tests/` | 当前构建和验收入口 |
 
 ## 数据与进程
@@ -22,6 +23,8 @@
 MyGO 页面直接调用 Go 服务获取按页面裁剪的快照。小窗口通过携带随机令牌的本机回环连接请求 `widget` / `refresh`；只获得小窗口所需统计。窗口显示 / 隐藏 / 更新和返回主窗口也通过该连接传递。父进程退出时小窗口随连接关闭退出。
 
 当前数据库位于 `%APPDATA%\codex-monitor`，由 Go 服务创建和管理。小窗口位置与置顶状态单独保存到 `widget-window.json`，主窗口状态保存到 `native-shell/`。已有 SQLite 数据库先通过只读连接执行完整性检查，避免失败退出时将 WAL 回写到主库；发现损坏后拒绝写入并显示启动错误。
+
+完整性检查失败的启动提示提供“备份并修复”。`monitor.RepairProfile` 独占数据目录，在私有副本中读取数据库和已提交 WAL，绕过索引逐行重建表，再重建索引并执行完整的 `integrity_check`。只有全部读取和验证成功才将原库及 WAL / SHM 移入 `database-backups` 并安装新库；替换失败时尝试回滚。设置、价格、账号、扫描偏移和清空历史边界随表一起保留，无法读取的行不会被静默丢弃。修复成功后主程序自动重启；随安装包提供的 `--repair-database` 使用相同恢复流程。
 
 ## 统计约束
 

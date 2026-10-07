@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -20,6 +21,7 @@ import (
 type Options struct {
 	Data, Home, Root, Capture, Snapshot string
 	Offline, Hidden, Smoke, SmokeWidget bool
+	RepairDatabase                      bool
 	Stdio                               bool
 }
 type App struct {
@@ -87,11 +89,19 @@ func Run(resources fs.FS) error {
 	flag.BoolVar(&o.Smoke, "smoke", false, "capture all native pages and exit")
 	flag.BoolVar(&o.SmokeWidget, "smoke-widget", false, "verify retained widget transport")
 	flag.BoolVar(&o.Stdio, "stdio", false, "run the Go data service over private stdio")
+	flag.BoolVar(&o.RepairDatabase, "repair-database", false, "back up and repair monitor database, then exit")
 	flag.Parse()
 	if o.Data == "" {
 		o.Data = filepath.Join(os.Getenv("APPDATA"), "codex-monitor")
 	}
 	o.Data, _ = filepath.Abs(o.Data)
+	if o.RepairDatabase {
+		backup, err := monitor.RepairProfile(o.Data)
+		if err == nil {
+			fmt.Printf("数据库修复成功；原数据库备份：%s\n", backup)
+		}
+		return err
+	}
 	if o.Home == "" {
 		o.Home = os.Getenv("CODEX_HOME")
 		if o.Home == "" {
@@ -124,11 +134,22 @@ func Run(resources fs.FS) error {
 	if o.Offline || (os.Getenv("MONITOR_TEST_DATA") != "" && os.Getenv("MONITOR_PI_HOME") == "") {
 		piHome, piSessions = "", ""
 	}
-	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, Offline: o.Offline, Version: "2.5.0"})
+	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, Offline: o.Offline, Version: "2.5.1"})
 	if err != nil {
 		if o.Snapshot == "" && !o.Stdio {
 			mygo.App.WhenReady(func() {
-				_, _ = mygo.Dialog.Message(mygo.MessageOptions{Type: mygo.MessageError, Title: "Codex Monitor 无法启动", Message: "无法打开监测数据", Detail: err.Error(), Buttons: []string{"关闭"}})
+				options := startupErrorDialog(err)
+				result, dialogErr := mygo.Dialog.Message(options)
+				if dialogErr == nil && errors.Is(err, monitor.ErrDatabaseIntegrity) && result.Button == 1 {
+					backup, repairErr := monitor.RepairProfile(o.Data)
+					if repairErr == nil {
+						_, _ = mygo.Dialog.Message(mygo.MessageOptions{Type: mygo.MessageInfo, Title: "Codex Monitor", Message: "数据库已修复，即将重新启动", Detail: "原数据库已保留在：\n" + backup, Buttons: []string{"重新启动"}})
+						err = nil
+						mygo.App.Relaunch()
+						return
+					}
+					_, _ = mygo.Dialog.Message(mygo.MessageOptions{Type: mygo.MessageError, Title: "Codex Monitor 修复失败", Message: "无法完整恢复监测数据", Detail: repairErr.Error() + "\n原数据库未被清空。", Buttons: []string{"关闭"}})
+				}
 				mygo.App.Quit()
 			})
 			_ = mygo.App.Run()
@@ -209,6 +230,15 @@ func Run(resources fs.FS) error {
 		}
 	})
 	return mygo.App.Run()
+}
+
+func startupErrorDialog(err error) mygo.MessageOptions {
+	options := mygo.MessageOptions{Type: mygo.MessageError, Title: "Codex Monitor 无法启动", Message: "无法打开监测数据", Detail: err.Error(), Buttons: []string{"关闭"}}
+	if errors.Is(err, monitor.ErrDatabaseIntegrity) {
+		options.Buttons = append(options.Buttons, "备份并修复")
+		options.Detail += "\n\n可尝试保留全部可读取的数据并重建索引。修复成功后自动重启；原库及日志文件会保留在数据目录的 database-backups 文件夹中。"
+	}
+	return options
 }
 func serveStdio(client *Client) error {
 	scanner := bufio.NewScanner(os.Stdin)

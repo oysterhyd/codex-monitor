@@ -81,9 +81,9 @@ Codex Monitor 是 Windows x64 本机监测工具。主窗口使用 **MyGO native
 
 ## 快速开始
 
-[下载 Windows x64 安装包](https://github.com/oysterhyd/codex-monitor/releases/download/v2.5.0/Codex-Monitor-Setup-2.5.0.exe) · [版本说明与 SHA-256 校验](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.5.0)
+[下载 Windows x64 安装包](https://github.com/oysterhyd/codex-monitor/releases/download/v2.5.1/Codex-Monitor-Setup-2.5.1.exe) · [版本说明与 SHA-256 校验](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.5.1)
 
-运行 `Codex-Monitor-Setup-2.5.0.exe`，按向导选择安装目录。默认安装到 `%LOCALAPPDATA%\Programs\Codex Monitor`，无需管理员权限，并创建桌面和开始菜单快捷方式。
+运行 `Codex-Monitor-Setup-2.5.1.exe`，按向导选择安装目录。默认安装到 `%LOCALAPPDATA%\Programs\Codex Monitor`，无需管理员权限，并创建桌面和开始菜单快捷方式。
 
 安装包包含 native 主程序和小窗口运行时，使用时无需安装 Go 或 Node.js。实时数据需要本机已有 Codex 安装及登录状态。更新前请从托盘完全退出应用；安装和卸载均保留 `%APPDATA%\codex-monitor` 中的统计与设置。
 
@@ -163,7 +163,21 @@ Go 可通过 PATH 查找，也支持 `%LOCALAPPDATA%\Programs\go\bin\go.exe` 或
 | `widget-window.json` | 小窗口的位置、置顶和模式 |
 | `native-shell/` | MyGO 窗口状态 |
 
-已有数据库先以只读方式检查完整性，失败时显示启动错误并拒绝写入。清空历史保留价格和设置，并设置日志重放边界。
+已有数据库先以只读方式检查完整性，失败时显示具体原因并拒绝写入。可点击启动提示中的 **备份并修复**，程序会读取全部表并重建索引；仅在全部读取成功且完整性检查通过后替换数据库并自动重启。原库及 `-wal` / `-shm` 保留在数据目录的 `database-backups/recovery-<时间>-<随机值>/` 中，无需另装工具。若表本身无法完整读取，修复会失败并保留原库。清空历史保留价格和设置，并设置日志重放边界。
+
+安装包中的主程序也支持命令行修复（先从托盘完全退出应用）：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Codex Monitor\Codex Monitor Native.exe" --repair-database
+```
+
+如果启动提示数据库完整性检查失败，可先从托盘完全退出应用，备份 `monitor.sqlite` 及其 `-wal` / `-shm` 文件，再从源码目录运行恢复工具（需要 Go）：
+
+```powershell
+go run ./cmd/repair --source "$env:APPDATA\codex-monitor\monitor.sqlite" --output "$env:APPDATA\codex-monitor\monitor-recovered.sqlite"
+```
+
+工具在副本上读取全部表，绕过损坏的索引，保留尚未合并到主文件的已提交 WAL 数据，并重建索引；只有所有行读取成功且完整性检查通过才保留恢复文件，不覆盖原库。若表本身无法完整读取，恢复会失败并报告表名。恢复成功后，将原库及 `-wal` / `-shm` 移到备份目录，再将恢复文件改名为 `monitor.sqlite`，最后重新启动应用。
 
 <details>
 <summary>自定义目录与隔离运行</summary>

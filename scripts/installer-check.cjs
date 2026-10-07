@@ -70,6 +70,15 @@ try {
   const snapshotFile = path.join(temporary, 'snapshot.json');
   powershell(`$process = Start-Process -FilePath ${quote(path.join(destination, exe))} -ArgumentList @('--offline', '--data', ${quote(`"${profile}"`)}, '--home', ${quote(`"${profile}"`)}, '--snapshot', '{}') -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput ${quote(snapshotFile)}; if ($process.ExitCode -ne 0) { throw 'Installed data service failed' }`);
   assert.equal(JSON.parse(fs.readFileSync(snapshotFile, 'utf8')).version, version);
+  // The installed executable must repair and back up a profile on its own,
+  // without invoking a development Go/Python/Node runtime.
+  const database = path.join(profile, 'monitor.sqlite');
+  const originalDigest = digest(database);
+  run(path.join(destination, exe), ['--repair-database', '--data', profile]);
+  const backups = path.join(profile, 'database-backups');
+  const backupDirectories = fs.readdirSync(backups);
+  assert.equal(backupDirectories.length, 1, 'Repair must retain the original database');
+  assert.equal(digest(path.join(backups, backupDirectories[0], 'monitor.sqlite')), originalDigest);
   const running = spawn(path.join(destination, exe), ['--offline', '--stdio', '--data', profile, '--home', profile], { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true });
   await once(running, 'spawn');
   try {
@@ -97,7 +106,7 @@ try {
   assert.equal(powershell(`Test-Path -LiteralPath ${quote(registry)}`).trim(), 'False');
   assert.equal(powershell(`$key = Get-Item -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'; [bool]$key.GetValue(${quote(name)}, $null)`).trim(), 'False');
   for (const directory of Object.values(shortcutPaths)) assert.ok(!fs.existsSync(path.join(directory, `${name}.lnk`)));
-  console.log(`Installer acceptance passed: ${count} file hashes, shortcuts, registry, installed service, running-app guard, upgrade and uninstall. User-added files preserved.`);
+  console.log(`Installer acceptance passed: ${count} file hashes, shortcuts, registry, installed service and database repair, running-app guard, upgrade and uninstall. User-added files preserved.`);
 } finally {
   if (installed && fs.existsSync(uninstaller)) runInstaller(uninstaller, ['/S', `_?=${destination}`]);
   const resolved = path.resolve(temporary);

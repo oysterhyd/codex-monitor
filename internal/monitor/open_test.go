@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -98,5 +99,12 @@ func TestReadonlyValidationIncludesPendingWAL(t *testing.T) {
 	defer s.Close()
 	if s.get("pending-wal") != "retained" {
 		t.Fatal("committed WAL ignored")
+	}
+}
+
+func TestValidationReportsCorruptionDetails(t *testing.T) {
+	err := checkExistingDatabase(pendingWALFixture(t, true))
+	if err == nil || !strings.Contains(err.Error(), "：") {
+		t.Fatalf("missing corruption details: %v", err)
 	}
 }
