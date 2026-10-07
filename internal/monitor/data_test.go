@@ -30,7 +30,7 @@ func TestAccountFiltersUnknownPricingAndWidgetScope(t *testing.T) {
 		query string
 		args  []any
 	}{
-		{"INSERT INTO sessions VALUES(?,?,?,?)", []any{"session", "project", "Codex Desktop", ts}},
+		{"INSERT INTO sessions(id,project,origin,created) VALUES(?,?,?,?)", []any{"session", "project", "Codex Desktop", ts}},
 		{"INSERT INTO usage(id,session,ts,model,input,cached,output,account) VALUES(?,?,?,?,?,?,?,?)", []any{"known", "session", ts, "gpt-5.5", 1000, 500, 100, "a"}},
 		{"INSERT INTO usage(id,session,ts,model,input,cached,output,account) VALUES(?,?,?,?,?,?,?,?)", []any{"unknown", "session", ts, "unpriced", 2000, 800, 200, "b"}},
 	} {
@@ -135,7 +135,7 @@ func TestDesktopModernDedupAndLegacyDifferences(t *testing.T) {
 	usage := func(input, output float64) Object {
 		return Object{"input_tokens": input, "cached_input_tokens": input / 2, "output_tokens": output, "total_tokens": input + output}
 	}
-	process("session_meta", Object{"id": "cli", "originator": "Codex CLI"})
+	process("session_meta", Object{"id": "unsupported", "originator": "Other Client"})
 	process("token_usage_record", Object{"response_id": "ignored", "usage": usage(9999, 999)})
 	process("session_meta", Object{"id": "desktop", "originator": "Codex Desktop"})
 	process("turn_context", Object{"model": "gpt-5.5"})
@@ -149,6 +149,6 @@ func TestDesktopModernDedupAndLegacyDifferences(t *testing.T) {
 	process("token_usage_record", Object{"response_id": "wrong-thread", "thread_id": "other", "usage": usage(9999, 999)})
 	r := s.mustOne("SELECT COUNT(*) n,SUM(input) input,SUM(output) output FROM usage")
 	if num(r["n"]) != 3 || num(r["input"]) != 380 || num(r["output"]) != 90 {
-		t.Fatal("duplicate/CLI usage counted", r)
+		t.Fatal("duplicate/unsupported usage counted", r)
 	}
 }

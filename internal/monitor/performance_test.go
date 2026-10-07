@@ -20,7 +20,7 @@ func benchmarkStore(b *testing.B) (*Store, time.Time) {
 	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	err = s.transaction(func() error {
 		for i := 0; i < 100; i++ {
-			if err := s.exec("INSERT INTO sessions VALUES(?,?,?,?)", fmt.Sprint(i), "project", "desktop", iso(now.Add(-24*time.Hour))); err != nil {
+			if err := s.exec("INSERT INTO sessions(id,project,origin,created) VALUES(?,?,?,?)", fmt.Sprint(i), "project", "desktop", iso(now.Add(-24*time.Hour))); err != nil {
 				return err
 			}
 		}

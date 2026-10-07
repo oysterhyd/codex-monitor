@@ -222,7 +222,7 @@ func (a *App) history(c *ui.Context) {
 		for _, row := range rows {
 			if a.expanded == str(row["session"])+":"+str(row["id"]) {
 				ui.Column(c).Key(a.expanded).Gap(14).Transition(enterMotion(0, 5)).Children(func() {
-					ui.Text(c, str(row["id"])+" · "+str(row["project"])).Bold()
+					ui.Text(c, str(row["id"])+" · "+str(row["project"])+" · "+str(row["origin"])).Bold()
 					for _, model := range objects(row["models"]) {
 						ui.Row(c).Gap(20).Children(func() {
 							ui.Text(c, str(model["model"])).Width(190)

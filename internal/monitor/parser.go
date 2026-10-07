@@ -5,6 +5,21 @@ import (
 	"encoding/json"
 )
 
+// Prefer known client identities; newer CLI logs also carry a session source.
+func codexSource(meta Object) string {
+	switch text(meta["originator"]) {
+	case "Codex Desktop", "codex_work_desktop", "codex_desktop":
+		return "desktop"
+	case "Codex CLI", "codex_cli_rs", "codex-tui", "codex-cli", "codex_exec":
+		return "cli"
+	}
+	switch text(meta["source"]) {
+	case "cli", "exec":
+		return "cli"
+	}
+	return ""
+}
+
 func rawAt(raw []byte, keys ...string) string {
 	for _, k := range keys {
 		var m map[string]json.RawMessage
@@ -129,20 +144,27 @@ func (s *Store) process(o, state Object, raw []byte) error {
 		return "unknown"
 	}
 	if o["type"] == "session_meta" {
-		state["session"], state["desktop"], state["project"] = p["id"], p["originator"] == "Codex Desktop", p["cwd"]
+		for k := range state {
+			delete(state, k)
+		}
+		state["session"], state["source"], state["project"], state["created"] = p["id"], codexSource(p), p["cwd"], ts
 		if !truth(state["project"]) {
 			state["project"] = UnassignedProject
 		}
-		if truth(state["desktop"]) && truth(state["session"]) {
-			return s.exec("INSERT OR IGNORE INTO sessions VALUES(?,?,?,?)", state["session"], state["project"], "Codex Desktop", ts)
+		if truth(state["source"]) && truth(state["session"]) {
+			origin := text(p["originator"])
+			if origin == "" {
+				origin = "Codex CLI"
+			}
+			return s.exec("INSERT INTO sessions(id,project,origin,created,source) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET source=excluded.source", state["session"], state["project"], origin, ts, state["source"])
 		}
 		return nil
 	}
-	if !truth(state["desktop"]) || !truth(state["session"]) {
+	if !truth(state["source"]) || !truth(state["session"]) {
 		return nil
 	}
 	cleared := text(s.settings()["clearedAt"])
-	allowed := cleared == "" || ts > cleared
+	allowed := (cleared == "" || ts > cleared) && ts >= text(state["created"])
 	switch o["type"] {
 	case "turn_context":
 		state["model"] = p["model"]
@@ -204,7 +226,11 @@ func (s *Store) process(o, state Object, raw []byte) error {
 						}
 					}
 					if num(usage["input_tokens"])+num(usage["output_tokens"]) > 0 {
-						if e := s.addUsage("legacy:"+hash(ts+rawAt(raw, "payload", "info", "total_token_usage")), usage, ts, state, "累计差分"); e != nil {
+						key := ts + rawAt(raw, "payload", "info", "total_token_usage")
+						if state["source"] == "cli" {
+							key = text(state["session"]) + "|" + key
+						}
+						if e := s.addUsage("legacy:"+hash(key), usage, ts, state, "累计差分"); e != nil {
 							return e
 						}
 					}
@@ -318,7 +344,7 @@ func (s *Store) processPi(o, state Object) error {
 	if len(existing) > 0 && !s.replay {
 		return nil
 	}
-	if e := s.exec("INSERT OR IGNORE INTO sessions VALUES(?,?,?,?)", state["session"], state["project"], PiOrigin, state["created"]); e != nil {
+	if e := s.exec("INSERT OR IGNORE INTO sessions(id,project,origin,created,source) VALUES(?,?,?,?,'pi')", state["session"], state["project"], PiOrigin, state["created"]); e != nil {
 		return e
 	}
 	session := state["session"]

@@ -404,6 +404,6 @@ func (a *App) quota(c *ui.Context) {
 			points = append(points, chartPoint{Time: float64(t.UnixMilli()), Value: 100 - number(q["used"]), Name: shortStamp(q["ts"]), Reset: number(q["resets"]), Gap: truth(q["gapBefore"])})
 		}
 		a.chart(c, "quota-"+strings.Join([]string{str(selected["account"]), str(selected["bucket"]), str(selected["slot"])}, ":"), points, true, true, "")
-		ui.Text(c, a.tr("额度属于当前登录账号，可能包含其他设备的用量；Token 统计仅覆盖本机 Codex 桌面端记录。")).Padding(13, 0, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(c.Theme().Border).FontSize(11).TextColor(c.Theme().TextMuted)
+		ui.Text(c, a.tr("额度属于当前登录账号，可能包含其他设备的用量；Token 统计覆盖本机 Codex 桌面端、CLI 与支持的 pi 记录。")).Padding(13, 0, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(c.Theme().Border).FontSize(11).TextColor(c.Theme().TextMuted)
 	})
 }

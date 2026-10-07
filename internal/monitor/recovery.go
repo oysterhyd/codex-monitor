@@ -122,6 +122,10 @@ func RecoverDatabase(source, destination string) (counts map[string]int64, err e
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	old := &Store{db: db}
+	version, err := old.one("PRAGMA user_version")
+	if err != nil {
+		return nil, err
+	}
 	schema, err := old.query(`SELECT type,name,sql FROM sqlite_master
 		WHERE sql IS NOT NULL AND substr(name,1,7) != 'sqlite_'
 		ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END,rootpage`)
@@ -188,7 +192,7 @@ func RecoverDatabase(source, destination string) (counts map[string]int64, err e
 				}
 			}
 		}
-		return nil
+		return newStore.exec(fmt.Sprintf("PRAGMA user_version=%d", int(num(version["user_version"]))))
 	})
 	if err != nil {
 		return nil, err

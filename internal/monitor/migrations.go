@@ -1,0 +1,76 @@
+package monitor
+
+import "fmt"
+
+const schemaVersion = 2
+const codexParserVersion = 1
+const piParserVersion = 2
+
+func (s *Store) checkSchemaVersion() error {
+	row, err := s.one("PRAGMA user_version")
+	if err != nil {
+		return err
+	}
+	if num(row["user_version"]) > schemaVersion {
+		return fmt.Errorf("数据库版本 %v 高于本程序支持的 %d，请升级 Codex Monitor", row["user_version"], schemaVersion)
+	}
+	return nil
+}
+
+// Called inside initialize's transaction: columns, indexes and version commit
+// together. Version zero includes every historical, unversioned schema.
+func (s *Store) migrate() error {
+	version := int(num(s.mustOne("PRAGMA user_version")["user_version"]))
+	if version < 1 {
+		if err := s.migrateLegacy(); err != nil {
+			return err
+		}
+	}
+	if version < 2 {
+		if err := s.exec(`ALTER TABLE sessions ADD COLUMN source TEXT NOT NULL DEFAULT 'unknown' CHECK(source IN ('unknown','desktop','cli','pi'));
+            ALTER TABLE files ADD COLUMN parser_version INTEGER NOT NULL DEFAULT 0;
+            UPDATE sessions SET source='desktop' WHERE origin='Codex Desktop';
+            UPDATE sessions SET source='pi' WHERE origin='pi · 官方 Codex';
+            CREATE INDEX sessions_source ON sessions(source,id);`); err != nil {
+			return err
+		}
+	}
+	if version < schemaVersion {
+		return s.exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion))
+	}
+	return nil
+}
+
+func (s *Store) migrateLegacy() error {
+	var e error
+	for _, change := range [][3]string{{"account_observations", "source", "TEXT NOT NULL DEFAULT 'codex'"}, {"usage", "account", "TEXT NOT NULL DEFAULT 'unassigned'"}, {"turns", "account", "TEXT NOT NULL DEFAULT 'unassigned'"}, {"quotas", "account", "TEXT NOT NULL DEFAULT 'unassigned'"}, {"prices", "retired", "INTEGER NOT NULL DEFAULT 0"}} {
+		cols, e := s.query("PRAGMA table_info(" + change[0] + ")")
+		if e != nil {
+			return e
+		}
+		found := false
+		for _, c := range cols {
+			if c["name"] == change[1] {
+				found = true
+			}
+		}
+		if !found {
+			if e = s.exec("ALTER TABLE " + change[0] + " ADD COLUMN " + change[1] + " " + change[2]); e != nil {
+				return e
+			}
+		}
+	}
+	for _, t := range []string{"usage", "turns", "quotas"} {
+		col := "ts"
+		if t == "turns" {
+			col = "started"
+		}
+		if e = s.exec("CREATE INDEX IF NOT EXISTS " + t + "_account_time ON " + t + "(account," + col + ")"); e != nil {
+			return e
+		}
+	}
+	if e = s.exec("CREATE INDEX IF NOT EXISTS quota_account_window_time ON quotas(account,bucket,slot,ts DESC)"); e != nil {
+		return e
+	}
+	return nil
+}

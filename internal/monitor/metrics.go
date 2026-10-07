@@ -362,6 +362,8 @@ func (s *Store) Snapshot(input Object, now time.Time) (Object, error) {
 		}
 		r["models"] = modelRows
 		r["project"] = projectOf(sessions, t["session"])
+		r["source"] = sessions[text(t["session"])]["source"]
+		r["origin"] = sessions[text(t["session"])]["origin"]
 		records = append(records, r)
 	}
 	duration, output := 0., 0.
@@ -593,9 +595,9 @@ func (s *Store) Export(f Object, now time.Time) (string, error) {
 		join = " AND s.project=?"
 		params = append([]any{f["project"]}, params...)
 	}
-	rows := s.mustQuery("SELECT u.*,s.project,t.id record_id,t.session record_session,t.model record_model FROM usage u LEFT JOIN sessions s ON s.id=u.session"+join+" LEFT JOIN turns t ON t.id=u.turn AND t.session=u.session WHERE "+strings.Join(conditions, " AND ")+" ORDER BY u.ts", params...)
+	rows := s.mustQuery("SELECT u.*,s.project,s.source,s.origin,t.id record_id,t.session record_session,t.model record_model FROM usage u LEFT JOIN sessions s ON s.id=u.session"+join+" LEFT JOIN turns t ON t.id=u.turn AND t.session=u.session WHERE "+strings.Join(conditions, " AND ")+" ORDER BY u.ts", params...)
 	pricing := indexPrices(s.prices())
-	cols := []string{"ts", "model", "session", "turn", "input", "cached", "output", "reasoning", "cache_write", "cost", "saved", "priceId", "kind", "account"}
+	cols := []string{"ts", "model", "session", "turn", "input", "cached", "output", "reasoning", "cache_write", "cost", "saved", "priceId", "kind", "account", "source", "origin"}
 	lines := []string{strings.Join(cols, ",")}
 	for _, r := range rows {
 		if !matches(Object{"id": r["record_id"], "session": r["record_session"], "model": r["record_model"]}, r["project"], search) {

@@ -208,6 +208,9 @@ func checkExistingDatabase(file string) error {
 	return nil
 }
 func (s *Store) initialize() error {
+	if e := s.checkSchemaVersion(); e != nil {
+		return e
+	}
 	e := s.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY,value TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY,offset INTEGER,state TEXT,mtime REAL);
@@ -225,36 +228,10 @@ func (s *Store) initialize() error {
 	if e != nil {
 		return e
 	}
-	for _, change := range [][3]string{{"account_observations", "source", "TEXT NOT NULL DEFAULT 'codex'"}, {"usage", "account", "TEXT NOT NULL DEFAULT 'unassigned'"}, {"turns", "account", "TEXT NOT NULL DEFAULT 'unassigned'"}, {"quotas", "account", "TEXT NOT NULL DEFAULT 'unassigned'"}, {"prices", "retired", "INTEGER NOT NULL DEFAULT 0"}} {
-		cols, e := s.query("PRAGMA table_info(" + change[0] + ")")
-		if e != nil {
-			return e
-		}
-		found := false
-		for _, c := range cols {
-			if c["name"] == change[1] {
-				found = true
-			}
-		}
-		if !found {
-			if e = s.exec("ALTER TABLE " + change[0] + " ADD COLUMN " + change[1] + " " + change[2]); e != nil {
-				return e
-			}
-		}
-	}
-	for _, t := range []string{"usage", "turns", "quotas"} {
-		col := "ts"
-		if t == "turns" {
-			col = "started"
-		}
-		if e = s.exec("CREATE INDEX IF NOT EXISTS " + t + "_account_time ON " + t + "(account," + col + ")"); e != nil {
-			return e
-		}
-	}
-	if e = s.exec("CREATE INDEX IF NOT EXISTS quota_account_window_time ON quotas(account,bucket,slot,ts DESC)"); e != nil {
-		return e
-	}
 	return s.transaction(func() error {
+		if e := s.migrate(); e != nil {
+			return e
+		}
 		if !truth(s.get("seeded")) {
 			for _, p := range officialPrices {
 				if e = s.seedPrice(p, officialSource, "1970-01-01T00:00:00.000Z"); e != nil {

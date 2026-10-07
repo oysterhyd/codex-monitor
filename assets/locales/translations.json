@@ -136,7 +136,7 @@
   "剩余额度历史": "Quota history",
   "额度窗口": "Quota window",
   "剩余额度历史曲线": "Remaining quota history",
-  "额度属于当前登录账号，可能包含其他设备的用量；Token 统计仅覆盖本机 Codex 桌面端记录。": "Quota belongs to the signed-in account and may include usage from other devices; token totals only cover Codex desktop records on this machine.",
+  "额度属于当前登录账号，可能包含其他设备的用量；Token 统计覆盖本机 Codex 桌面端、CLI 与支持的 pi 记录。": "Quota belongs to the signed-in account and may include usage from other devices; token totals cover local Codex desktop, CLI and supported Pi records.",
   "本机数据 ·": "Local data · ",
   " 起": " onward",
   "等待首条记录": "Awaiting first record",

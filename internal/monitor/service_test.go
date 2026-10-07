@@ -75,7 +75,7 @@ func TestClearBoundaryAndValidation(t *testing.T) {
 		o := Object{"type": "token_usage_record", "timestamp": iso(ts), "payload": Object{"response_id": iso(ts), "usage": Object{"input_tokens": 100., "output_tokens": 20.}}}
 		raw, _ := json.Marshal(o)
 		st := clone(state)
-		st["desktop"] = true
+		st["source"] = "desktop"
 		if e = s.process(o, st, raw); e != nil {
 			t.Fatal(e)
 		}

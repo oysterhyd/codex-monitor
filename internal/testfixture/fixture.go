@@ -60,7 +60,11 @@ func Seed(dir string) error {
 		}
 	}
 	for i := 0; i < 9; i++ {
-		if err = exec("INSERT INTO sessions VALUES(?,?,?,?)", fmt.Sprintf("native-session-%d", i), fmt.Sprintf(`D:\验收项目\项目%d`, i%3), "Codex Desktop", stamp(date)); err != nil {
+		origin, source := "Codex Desktop", "desktop"
+		if i%3 == 1 {
+			origin, source = "codex-tui", "cli"
+		}
+		if err = exec("INSERT INTO sessions(id,project,origin,created,source) VALUES(?,?,?,?,?)", fmt.Sprintf("native-session-%d", i), fmt.Sprintf(`D:\验收项目\项目%d`, i%3), origin, stamp(date), source); err != nil {
 			return err
 		}
 	}

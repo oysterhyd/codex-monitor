@@ -122,21 +122,25 @@ func (s *Store) Scan(ctx context.Context, home, piHome, piSessions string, full 
 			_ = json.Unmarshal([]byte(text(old["state"])), &state)
 		}
 		pi := s.piFiles[file]
-		replayPi := pi && len(old) > 0 && num(state["piParserVersion"]) != 2
+		version := codexParserVersion
+		if pi {
+			version = piParserVersion
+		}
+		reparse := len(old) > 0 && num(old["parser_version"]) != float64(version)
 		mtime := float64(st.ModTime().UnixNano()) / 1e6
-		if !replayPi && len(old) > 0 && num(old["offset"]) == float64(st.Size()) && abs(num(old["mtime"])-mtime) < .001 {
+		if !reparse && len(old) > 0 && num(old["offset"]) == float64(st.Size()) && abs(num(old["mtime"])-mtime) < .001 {
 			scanned++
 			continue
 		}
 		changed = true
 		offset := int64(0)
-		if !replayPi && num(old["offset"]) <= float64(st.Size()) {
+		if !reparse && num(old["offset"]) <= float64(st.Size()) {
 			offset = int64(num(old["offset"]))
 		}
 		if offset == 0 {
 			state = Object{}
 		}
-		if !pi && state["desktop"] == false && offset > 0 {
+		if !pi && state["source"] == "" && offset > 0 {
 			if e = s.exec("UPDATE files SET offset=?,mtime=? WHERE path=?", st.Size(), mtime, file); e != nil {
 				return nil, e
 			}
@@ -185,13 +189,10 @@ func (s *Store) Scan(ctx context.Context, home, piHome, piSessions string, full 
 					e = s.process(record, state, line)
 				}
 				if e != nil {
-					report("record_parse", file)
+					return e // Roll back the file offset as well as its statistics.
 				}
 			}
-			if pi {
-				state["piParserVersion"] = 2
-			}
-			return s.exec("INSERT OR REPLACE INTO files VALUES(?,?,?,?)", file, offset, jsonText(state), mtime)
+			return s.exec("INSERT OR REPLACE INTO files(path,offset,state,mtime,parser_version) VALUES(?,?,?,?,?)", file, offset, jsonText(state), mtime, version)
 		})
 		if e != nil {
 			if ctx.Err() != nil {
