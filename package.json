@@ -1,6 +1,6 @@
 {
   "name": "codex-monitor",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "description": "Native Go Windows Codex desktop usage monitor",
   "private": true,
   "author": "Codex Monitor",

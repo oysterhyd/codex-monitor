@@ -202,7 +202,13 @@ func (a *App) activity(c *ui.Context, compactView bool) {
 						ui.Text(c, a.tr(label)).Height(14).FontSize(9).TextColor(c.Theme().TextMuted)
 					}
 				})
-				ui.Row(c).Grow(1).Gap(4).Children(func() {
+				grid := ui.Row(c).Key(fmt.Sprintf("calendar-%d-%s", year, metric)).Grow(1).Gap(4).Label(a.tr("活动热力图"))
+				// Register pointer tracking once for the grid; paint-only frames reuse its layout.
+				grid.PointerPosition()
+				grid.Hovered()
+				started := ui.Local(grid, "reveal", func() time.Time { return c.Now() })
+				light := ui.Local(grid, "light", func() widgetMotion { return widgetMotion{} })
+				grid.Children(func() {
 					for week := 0; week < weeks; week++ {
 						ui.Column(c).Grow(1).Basis(0).Gap(4).Children(func() {
 							for day := 0; day < 7; day++ {
@@ -235,22 +241,17 @@ func (a *App) activity(c *ui.Context, compactView bool) {
 								if metric == "total" {
 									label += " tokens"
 								}
-								cell := ui.Box(c).FillWidth().Height(14).Radius(3).Background(color).Border(1, border).Label(label).Tooltip(label).Disabled(date > str(activity["today"]))
+								cell := ui.Box(c).Key(date).FillWidth().Height(14).Radius(3).Label(label).Tooltip(label).Disabled(date > str(activity["today"]))
+								cell.Hovered()
 								if date <= str(activity["today"]) {
 									cell.Focusable()
 								} else {
 									cell.Opacity(.25).Background(ui.Transparent)
 								}
 								cells[date] = cell
-								if date == str(activity["today"]) || date == a.selectedDay {
-									outline, width := c.Theme().Accent, float32(1)
-									if date == a.selectedDay {
-										outline, width = c.Theme().Text, 2
-									}
-									cell.Draw(func(p *ui.Painter, r ui.Rect) {
-										p.Stroke(ui.Rect{X: r.X - 2, Y: r.Y - 2, W: r.W + 4, H: r.H + 4}, outline, 3, width)
-									})
-								}
+								cell.Draw(func(p *ui.Painter, r ui.Rect) {
+									calendarCell(c, p, grid, cell, r, color, border, *started, week, light, date <= str(activity["today"]), date == str(activity["today"]), date == a.selectedDay)
+								})
 								if cell.Clicked() {
 									a.selectedDay = date
 								}
@@ -307,50 +308,39 @@ func (a *App) activity(c *ui.Context, compactView bool) {
 }
 func (a *App) activityDetails(c *ui.Context, activity Object) {
 	stats := obj(activity["stats"])
-	ui.Row(c).Gap(18).AlignItems(ui.Stretch).Children(func() {
-		surface(c, 1, 374, func() {
+	textScale := max(float32(1), c.Preferences().TextScale)
+	ui.Row(c).Gap(18).Wrap().AlignItems(ui.Stretch).Children(func() {
+		surface(c, 1, 0, func() {
 			panelHeading(c, a.tr("活跃时段"), a.tr("本地时间 · 年度汇总"))
-			maximum := 1.0
-			hours := objects(activity["hours"])
-			for _, h := range hours {
-				maximum = max(maximum, number(h["total"]))
-			}
-			ui.Row(c).Height(164).Margin(14, 0, 0, 0).Gap(6).AlignItems(ui.End).Children(func() {
-				for _, h := range hours {
-					ui.Column(c).Grow(1).Basis(0).Gap(7).Children(func() {
-						ui.Column(c).Height(140).Justify(ui.End).Radius(5).Background(c.Theme().SurfaceHover.Alpha(.38)).Children(func() {
-							ui.Box(c).Height(max(2, float32(140*number(h["total"])/maximum))).FillWidth().Radius(4).Gradient(c.Theme().Surface.Mix(c.Theme().Accent, .65), c.Theme().Accent, 0).Opacity(.8)
-						})
-						label := ""
-						if int(number(h["hour"]))%4 == 0 {
-							label = fmt.Sprintf("%02.0f", number(h["hour"]))
-						}
-						ui.Text(c, label).Height(18).FontSize(10).TextColor(c.Theme().TextMuted)
-					})
-				}
-			})
+			a.activityHours(c, activity)
 			ui.Row(c).Padding(13, 0, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(c.Theme().Border).Children(func() {
 				ui.Text(c, a.tr("高峰日期")+"  "+str(obj(stats["peak"])["date"])).FontSize(11).Grow(1)
 				ui.Text(c, compact(obj(stats["peak"])["total"])+" tokens").FontSize(11).TextColor(c.Theme().TextMuted)
 			})
-		})
-		surface(c, 1, 374, func() {
+		}).MinHeight(374).MinWidth(320 * textScale)
+		surface(c, 1, 0, func() {
 			panelHeading(c, a.tr("最近活动日"), a.tr("{0} 个任务", stats["sessions"]))
 			list := objects(activity["days"])
-			for i := len(list) - 1; i >= max(0, len(list)-8); i-- {
-				day := list[i]
-				row := ui.Row(c).Height(32).Gap(14).Padding(8).Focusable().Label(str(day["date"]))
-				row.Children(func() {
-					ui.Text(c, str(day["date"])).Width(84).FontSize(11)
-					ui.Progress(c, number(day["total"])/max(1, number(obj(stats["peak"])["total"]))).Height(4).Grow(1).Opacity(.5)
-					ui.Text(c, compact(day["total"])).Width(65).FontSize(11)
-					icon(c, "arrow", 14)
-				})
-				if row.Clicked() {
-					a.openDay(str(day["date"]))
+			ui.Column(c).Key("recent-days").Label(a.tr("最近活动日列表")).Shrink(0).Gap(4).Children(func() {
+				for i := len(list) - 1; i >= max(0, len(list)-8); i-- {
+					day := list[i]
+					row := ui.Row(c).Key(str(day["date"])).Shrink(0).MinHeight(32).Gap(10).Padding(6, 8).Radius(7).Focusable().Label(str(day["date"]))
+					activityRowHover(c, row)
+					row.Children(func() {
+						ui.Text(c, str(day["date"])).Width(84 * textScale).FontSize(11).NoWrap()
+						animatedProgress(c, "day-fill", number(day["total"])/max(1, number(obj(stats["peak"])["total"]))).Height(4).Grow(1).Opacity(.5)
+						ui.Text(c, compact(day["total"])).Width(55 * textScale).FontSize(11).NoWrap()
+						icon(c, "arrow", 14)
+					})
+					if row.Clicked() {
+						a.openDay(str(day["date"]))
+					}
 				}
+			})
+			if len(list) == 0 {
+				ui.Text(c, a.tr("这个时间范围内还没有记录")).TextColor(c.Theme().TextMuted)
 			}
-		})
+		}).Label(a.tr("最近活动日卡片")).MinHeight(374).MinWidth(320 * textScale)
 	})
 }
 func (a *App) quotaCard(c *ui.Context, q Object) {

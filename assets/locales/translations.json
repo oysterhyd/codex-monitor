@@ -1,4 +1,9 @@
 {
+  "活动热力图": "Activity heatmap",
+  "活跃时段柱状图": "Hourly activity chart",
+  "最近活动日列表": "Recent activity list",
+  "最近活动日卡片": "Recent activity card",
+  "移动鼠标或使用方向键查看每小时用量": "Hover or use arrow keys to inspect hourly usage",
   "软件更新": "Software updates",
   "当前版本": "Current version",
   "检查更新": "Check for updates",
