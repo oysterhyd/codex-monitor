@@ -20,6 +20,8 @@
 2. 默认接收地址为 `http://127.0.0.1:4319/v1/logs`。如端口被占用，可修改端口并点击“应用端口”。修改后同步更新客户端配置或重新导出 Pi 扩展。
 3. 为各客户端完成下面的配置，保持 Monitor 在后台运行。
 
+开关只启动 Monitor 的本机接收器，不会自动修改 Codex 配置或加载 Pi 扩展。“采集已开启”表示接收端口就绪；完成客户端配置并产生新调用后，才会出现“最近接收”和首字样本。用量记录、日志中的重试事件可以独立采集到，因此看到这些记录并不代表首字采集已接通。开启前的历史记录仍会显示“未知”。
+
 ### Codex Desktop / CLI
 
 点击“复制 Codex 采集配置”，将内容合并到实际 `CODEX_HOME/config.toml`（默认 `%USERPROFILE%\.codex\config.toml`）。已有 `[otel]` 段时修改其对应字段，避免重复段或重复 `exporter`。配置完成后重启 Desktop / CLI；分别使用不同 `CODEX_HOME` 的客户端需分别配置。
@@ -42,7 +44,9 @@ exporter = { otlp-http = { endpoint = "http://127.0.0.1:4319/v1/logs", protocol 
 pi -e "$env:APPDATA\codex-monitor\integrations\pi\codex-monitor.ts"
 ```
 
-可按 Pi 自身的扩展设置长期加载该文件。扩展不会更改模型请求、正文或认证配置，只发送时间、Token 签名、响应 ID、模型和诊断类别。延续原有官方登录识别规则：`openai-codex`，或能通过当前本机 OAuth 配置识别的 `openai`；不扩展到未知 API 登录来源。Monitor 接收失败时不阻塞或改变模型结果；未启动 Monitor 时的诊断不会保存到磁盘。
+如需自动加载，可将导出文件复制到 `PI_CODING_AGENT_DIR/extensions/codex-monitor.ts`（默认 `%USERPROFILE%\.pi\agent\extensions\codex-monitor.ts`），然后重启 Pi 或执行 `/reload`。自动加载后正常启动 `pi` 即可，无需再用 `-e` 加载另一份相同扩展。
+
+扩展不会更改模型请求、正文或认证配置，只发送时间、Token 签名、响应 ID、模型和诊断类别。延续原有官方登录识别规则：`openai-codex`，或能通过当前本机 OAuth 配置识别的 `openai`；不扩展到未知 API 登录来源。Monitor 接收失败时不阻塞或改变模型结果；未启动 Monitor 时的诊断不会保存到磁盘。
 
 如手动加载仓库中的扩展，可使用 `integrations/pi/codex-monitor.ts`。自定义接收端口时设置 `CODEX_MONITOR_OTEL_URL=http://127.0.0.1:<端口>/v1/logs`，扩展只接受 `127.0.0.1` 上的 HTTP 目标。Pi 需要支持 `before_provider_request`、`before_provider_headers`、`after_provider_response`、`message_update` 和 `message_end` 钩子；没有请求开始或首内容事件的记录保持未知。
 
