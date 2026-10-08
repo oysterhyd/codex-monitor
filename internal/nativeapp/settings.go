@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +56,10 @@ func (a *App) telemetrySettings(c *ui.Context, settings Object) {
 		status := obj(a.data["telemetry"])
 		label := "采集未开启"
 		if truth(status["listening"]) {
-			label = "采集已开启"
+			label = "接收就绪，等待新调用"
+			if number(status["ttftSamples"]) > 0 {
+				label = "已收到首字数据"
+			}
 		}
 		ui.Text(c, a.tr(label)+" · 127.0.0.1:"+str(settings["telemetryPort"])).FontSize(12)
 		if str(status["error"]) != "" {
@@ -68,30 +68,29 @@ func (a *App) telemetrySettings(c *ui.Context, settings Object) {
 		if status["receivedAt"] != nil {
 			ui.Text(c, a.tr("最近接收")+" "+shortStamp(status["receivedAt"])).FontSize(11).TextColor(c.Theme().TextMuted)
 		}
-		ui.Text(c, a.tr("Codex：复制配置，合并到 CODEX_HOME/config.toml 的现有 otel 段，再重启 Desktop 或 CLI。Pi：导出扩展后使用复制的命令加载。")).FontSize(12)
-		ui.Row(c).Gap(12).Children(func() {
-			if ui.Button(c, a.tr("复制 Codex 采集配置")).Clicked() {
-				mygo.Clipboard.WriteText(str(status["config"]))
-				a.toast = a.tr("采集配置已复制")
+		ui.Text(c, a.tr("自动配置 Codex Desktop / CLI 和 Pi，无需编辑文件或复制加载命令。")).FontSize(12)
+		for _, client := range []string{"codex", "pi"} {
+			binding := obj(status[client])
+			name := "Codex Desktop / CLI"
+			if client == "pi" {
+				name = "Pi"
 			}
-			if ui.Button(c, a.tr("导出 Pi 扩展")).Disabled(a.busy).Clicked() {
-				port := str(settings["telemetryPort"])
+			if str(binding["error"]) != "" {
+				ui.Text(c, name+" · "+a.tr(str(binding["error"]))).FontSize(12).TextColor(c.Theme().Danger)
+			} else if str(binding["state"]) == "ready" {
+				ui.Text(c, name+" · "+a.tr("已自动配置")).FontSize(12).TextColor(c.Theme().TextMuted)
+			}
+		}
+		if truth(obj(status["codex"])["restartRequired"]) || truth(obj(status["pi"])["restartRequired"]) {
+			ui.Text(c, a.tr("配置已更新：正在运行的 Codex Desktop / CLI 需重启一次；Pi 可执行 /reload。之后的新调用自动采集。")).FontSize(12)
+		}
+		ui.Row(c).Gap(12).Children(func() {
+			if ui.Button(c, a.tr("重新检查自动配置")).Disabled(a.busy).Clicked() {
 				a.perform(func() (any, error) {
-					data, err := fs.ReadFile(a.resources, "integrations/pi/codex-monitor.ts")
-					if err != nil {
-						return nil, err
-					}
-					path := filepath.Join(a.options.Data, "integrations", "pi", "codex-monitor.ts")
-					if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-						return nil, err
-					}
-					data = []byte(strings.ReplaceAll(string(data), "http://127.0.0.1:4319/v1/logs", "http://127.0.0.1:"+port+"/v1/logs"))
-					if err = os.WriteFile(path, data, 0600); err != nil {
-						return nil, err
-					}
-					mygo.Clipboard.WriteText("pi -e \"" + path + "\"")
-					return true, nil
-				}, "Pi 扩展已导出，加载命令已复制")
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					return a.client.Call(ctx, "telemetrySetup", Object{})
+				}, "自动配置已检查")
 			}
 		})
 		ui.Text(c, a.tr("历史日志没有首字时间时无法补算；客户端未导出的内部重试无法观测。")).FontSize(11).TextColor(c.Theme().TextMuted)

@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 type Config struct {
 	Data, Home, PiHome, PiSessions, Version string
+	PiExtension                             []byte
 	Offline                                 bool
 }
 type Event struct {
@@ -74,7 +76,7 @@ func (s *Service) loop() {
 	quota := time.NewTicker(5 * time.Second)
 	defer scan.Stop()
 	defer quota.Stop()
-	_ = s.configureTelemetry()
+	_ = s.configureTelemetry(true)
 	if !s.config.Offline {
 		s.scan(false)
 		s.beginQuota()
@@ -169,11 +171,14 @@ func (s *Service) handle(method string, raw json.RawMessage) (out json.RawMessag
 		previous := s.store.settings()
 		value, err = s.store.saveSettings(p)
 		if err == nil && (p["telemetryEnabled"] != nil || p["telemetryPort"] != nil) {
-			if err = s.configureTelemetry(); err != nil {
+			if err = s.configureTelemetry(false); err != nil {
 				_, _ = s.store.saveSettings(previous)
-				_ = s.configureTelemetry()
+				_ = s.configureTelemetry(false)
 			}
 		}
+	case "telemetrySetup":
+		err = s.configureTelemetry(false)
+		value = s.store.get("telemetryStatus")
 	case "price":
 		value, err = s.store.savePrice(p)
 	case "deletePrice":
@@ -219,6 +224,14 @@ func (s *Service) handle(method string, raw json.RawMessage) (out json.RawMessag
 		status := obj(s.store.get("telemetryStatus"))
 		status["receivedAt"], status["receivedEvents"] = iso(now), len(events)
 		status["totalEvents"] = num(status["totalEvents"]) + float64(len(events))
+		status["ttftSamples"] = num(s.store.mustOne("SELECT COUNT(*) n FROM request_events WHERE source='otel' AND kind='completed' AND ttft IS NOT NULL")["n"])
+		for _, event := range events {
+			client := "codex"
+			if strings.HasPrefix(text(event["session"]), "pi:") {
+				client = "pi"
+			}
+			obj(status[client])["restartRequired"] = false
+		}
 		err = s.store.set("telemetryStatus", status)
 		value = true
 	default:

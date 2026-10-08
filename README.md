@@ -47,7 +47,7 @@ Codex Monitor 是 Windows x64 本机监测工具。主窗口使用 **MyGO native
 
 支持今日、近 7 天、近 30 天、全部和自定义时间范围。标准 Windows 标题栏保留拖动、缩放、最小化和最大化；关闭窗口后继续在托盘采集，完全退出请使用托盘菜单。
 
-历史分析可切换“任务分析 / 逐次调用”。逐次记录采用紧凑行，显示时间与状态、模型、首字时间、输入 / 输出、缓存命中和费用；点击展开详情。任务内明细显示消耗占比、平均 / P95 首字和失败重试事件，不展示来源列。Desktop、CLI 和已配置的 Pi 用量继续采集。首字时间需在设置中开启本机采集，并配置 Codex OTel 或加载内置 Pi 扩展；完整说明见 [逐次用量与首字分析](docs/request-analysis.md)。
+历史分析可切换“任务分析 / 逐次调用”。逐次记录采用紧凑行，显示时间与状态、模型、首字时间、输入 / 输出、缓存命中和费用；点击展开详情。任务内明细显示消耗占比、平均 / P95 首字和失败重试事件，不展示来源列。Desktop、CLI 和已配置的 Pi 用量继续采集。新安装默认开启首字采集，自动配置 Codex Desktop / CLI 和 Pi；升级保留原开关，开启后自动接通。正在运行的客户端只需重启一次，Pi 也可执行 `/reload`；完整说明见 [逐次用量与首字分析](docs/request-analysis.md)。
 
 页面、筛选、数字和图表具有过渡反馈，小窗口保留卡片 / 圆球动画与鼠标高光。两种界面均遵循系统减少动态效果设置。
 
@@ -85,9 +85,9 @@ Codex Monitor 是 Windows x64 本机监测工具。主窗口使用 **MyGO native
 
 ## 快速开始
 
-[下载 Windows x64 安装包](https://github.com/oysterhyd/codex-monitor/releases/download/v2.8.0/Codex-Monitor-Setup-2.8.0.exe) · [版本说明与 SHA-256 校验](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.8.0)
+[下载 Windows x64 安装包](https://github.com/oysterhyd/codex-monitor/releases/download/v2.8.1/Codex-Monitor-Setup-2.8.1.exe) · [版本说明与 SHA-256 校验](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.8.1)
 
-运行 `Codex-Monitor-Setup-2.8.0.exe`，按向导选择安装目录。默认安装到 `%LOCALAPPDATA%\Programs\Codex Monitor`，无需管理员权限，并创建桌面和开始菜单快捷方式。
+运行 `Codex-Monitor-Setup-2.8.1.exe`，按向导选择安装目录。默认安装到 `%LOCALAPPDATA%\Programs\Codex Monitor`，无需管理员权限，并创建桌面和开始菜单快捷方式。
 
 安装包内的原生主程序同时包含主窗口和桌面小窗口，使用时无需安装 Go 或 Node.js。实时数据需要本机已有 Codex 安装及登录状态。升级时会移除旧版小窗口已知的 Electron 运行文件，保留用户额外添加的文件。更新前请从托盘完全退出应用；安装和卸载均保留 `%APPDATA%\codex-monitor` 中的统计与设置。
 

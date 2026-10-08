@@ -301,6 +301,7 @@ func TestOTLPHTTPCollectorAcceptsJSONAndRejectsBrowserAndOversizedBodies(t *test
 
 func TestCollectorPortConflictRollsBackAndShutdownReleasesPort(t *testing.T) {
 	s := testStore(t)
+	_, _ = s.saveSettings(Object{"telemetryEnabled": false})
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

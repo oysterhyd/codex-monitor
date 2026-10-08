@@ -31,7 +31,7 @@ See docs/architecture.md for data contracts and maintenance rules.
 
 ## Invariants
 
-Do not write Codex/Pi source files or persist message bodies, tool calls, authentication tokens or API keys. Preserve unknown values, response-ID deduplication, clear-history boundaries, account attribution and manual price versions. Widget usage covers all local accounts while quota belongs to the current account. The widget never opens SQLite.
+Do not write Codex/Pi session or diagnostic source files or persist message bodies, tool calls, authentication tokens or API keys. The enabled local TTFT collector may manage only Codex OTel settings and the bundled Pi extension, with configuration backup, ownership checks and preservation of unrelated settings. Offline mode must not modify client files. Preserve unknown values, response-ID deduplication, clear-history boundaries, account attribution and manual price versions. Widget usage covers all local accounts while quota belongs to the current account. The widget never opens SQLite.
 
 Preserve the fixed 560x380 DIP window, 536x356 card, 120x120 orb, CSS-equivalent timings/geometry, language and tooltip semantics, drag threshold, click suppression, transparent hit testing, keyboard focus, right-click menu, topmost choice, position and mode persistence. Respect reduced motion/transparency. Reassert fixed physical dimensions on every placement and DPI change. Release timers, pointer capture, tooltips and GDI objects on close; cancel pending requests.
 

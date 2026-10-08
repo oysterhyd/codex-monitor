@@ -161,7 +161,11 @@ func Run(resources fs.FS) error {
 	if o.Offline || (os.Getenv("MONITOR_TEST_DATA") != "" && os.Getenv("MONITOR_PI_HOME") == "") {
 		piHome, piSessions = "", ""
 	}
-	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, Offline: o.Offline, Version: appVersion})
+	piExtension, err := fs.ReadFile(resources, "integrations/pi/codex-monitor.ts")
+	if err != nil {
+		return err
+	}
+	client, err := startNativeClient(monitor.Config{Data: o.Data, Home: o.Home, PiHome: piHome, PiSessions: piSessions, PiExtension: piExtension, Offline: o.Offline, Version: appVersion})
 	if err != nil {
 		if o.Snapshot == "" && !o.Stdio {
 			mygo.App.WhenReady(func() {

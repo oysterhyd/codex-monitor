@@ -124,7 +124,7 @@ func rowsArray(v []Object) []Object {
 	return v
 }
 func defaultSettings() Object {
-	return Object{"theme": "system", "language": "zh-CN", "muted": false, "autoStart": false, "quotaInterval": 60, "codexExecutable": "", "clearedAt": nil, "telemetryEnabled": false, "telemetryPort": 4319}
+	return Object{"theme": "system", "language": "zh-CN", "muted": false, "autoStart": false, "quotaInterval": 60, "codexExecutable": "", "clearedAt": nil, "telemetryEnabled": true, "telemetryPort": 4319}
 }
 
 type Store struct {

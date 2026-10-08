@@ -16,39 +16,23 @@
 
 首字时间是单次模型请求发出至首次模型内容输出的等待时间，包含首次推理 / 文本 / 工具流内容，不是整个任务耗时。Codex 使用其完成事件中明确的 `ttft_ms`；Pi 扩展使用 provider 请求前与首次非空内容增量的单调时钟，兼容复用 WebSocket 的请求。平均 / P95 使用已关联用量的 TTFT 样本；失败后仍有明确首字时间的诊断行也会显示该值。没有数据时不会用相邻日志时间差补算，也无法补回未采集的历史 TTFT。
 
-1. 打开“设置与价格 → 通用 → 本机首字采集”，打开开关。
-2. 默认接收地址为 `http://127.0.0.1:4319/v1/logs`。如端口被占用，可修改端口并点击“应用端口”。修改后同步更新客户端配置或重新导出 Pi 扩展。
-3. 为各客户端完成下面的配置，保持 Monitor 在后台运行。
+新安装默认开启本机首字采集；升级保留已有开关。打开 Monitor 或在“设置与价格 → 通用 → 本机首字采集”开启开关后，程序自动完成客户端接入，无需复制配置、编辑文件或手动加载扩展。
 
-开关只启动 Monitor 的本机接收器，不会自动修改 Codex 配置或加载 Pi 扩展。“采集已开启”表示接收端口就绪；完成客户端配置并产生新调用后，才会出现“最近接收”和首字样本。用量记录、日志中的重试事件可以独立采集到，因此看到这些记录并不代表首字采集已接通。开启前的历史记录仍会显示“未知”。
+- **Codex Desktop / CLI**：在 Monitor 当前使用的 `CODEX_HOME/config.toml`（默认 `%USERPROFILE%\.codex\config.toml`）自动合并本机 OTel 导出器，并关闭提示词导出。模型、登录、其他设置和遥测字段保留；第一次修改前在同目录保留 `config.toml.codex-monitor.bak`。Desktop 与 CLI 共用该目录时同时生效，使用其他目录时按 Monitor 的 `--home` / `MONITOR_CODEX_HOME` / `CODEX_HOME` 配置接入。
+- **Pi**：将内置扩展自动安装到 `PI_CODING_AGENT_DIR/extensions/codex-monitor.ts`（默认 `%USERPROFILE%\.pi\agent\extensions\codex-monitor.ts`）。正常启动 `pi` 即自动加载，无需 `-e`。Pi 目录遵循 `MONITOR_PI_HOME` / `PI_CODING_AGENT_DIR`。
+- **已有运行中的客户端**：配置只在客户端初始化时读取，因此首次接入或修改端口后需重启 Codex Desktop / CLI 一次；Pi 可重启或执行 `/reload`。之后的新调用自动采集，历史缺失时间无法补算。
 
-### Codex Desktop / CLI
+接收器默认监听 `127.0.0.1:4319`。启动时端口被占用会自动选择后续 16 个端口内的空闲端口，并同步客户端配置；也可在设置中应用其他端口。手动选择被占用的端口会回滚设置。关闭开关停止接收，并撤回程序管理的 Codex 字段及 Pi 扩展；用户在此期间修改的其他配置仍保留。完全退出 Monitor 时接收器停止，客户端配置保留，便于下次启动继续采集。
 
-点击“复制 Codex 采集配置”，将内容合并到实际 `CODEX_HOME/config.toml`（默认 `%USERPROFILE%\.codex\config.toml`）。已有 `[otel]` 段时修改其对应字段，避免重复段或重复 `exporter`。配置完成后重启 Desktop / CLI；分别使用不同 `CODEX_HOME` 的客户端需分别配置。
+设置显示每个客户端的自动配置结果：“接收就绪，等待新调用”表示接收器已启动；“已收到首字数据”表示确实收到完成事件中的 TTFT。“最近接收”显示事件到达时间。用量及日志中的重试事件可独立采集到，看到这些记录不表示首字已经接通。“重新检查自动配置”可重新检查和同步，无需手动复制。
 
-```toml
-[otel]
-log_user_prompt = false
-exporter = { otlp-http = { endpoint = "http://127.0.0.1:4319/v1/logs", protocol = "json" } }
-```
+已有其他 OTel 导出器、不同的同名 Pi 扩展、无效或不可写配置不会被静默覆盖，设置中显示具体原因。关闭时仅恢复仍与程序管理状态相符的字段，不覆盖之后的手动更改。离线模式不启动接收器，也不修改客户端文件。
 
-该配置使用官方 Codex 的 OTel 日志导出，对官方订阅和 CLI 同样适用。Monitor 接收 OTLP HTTP JSON（支持 gzip），不提供 OTLP gRPC / protobuf 接口。Codex 异步批量导出，事件可能晚于会话日志到达，界面会在收到并关联后更新。
+Codex 使用官方 OTel 日志导出，对官方订阅和 CLI 同样适用。自动配置仅设置 `log_user_prompt = false` 及指向本机接收器的 OTLP HTTP JSON exporter；支持 gzip，不提供 gRPC / protobuf 接口。Codex 异步批量导出，事件可能晚于会话日志到达，界面会在收到并关联后更新。配置依据：[官方 Codex 可观测性文档](https://learn.chatgpt.com/docs/config-file/config-advanced#observability-and-telemetry)。
 
-配置依据：[官方 Codex 可观测性文档](https://learn.chatgpt.com/docs/config-file/config-advanced#observability-and-telemetry)。如果已有其他 OTel exporter，请自行选择采集目标；Monitor 不覆盖已有配置或转发事件。
+Pi 扩展只发送时间、Token 签名、响应 ID、模型和诊断类别，不更改模型请求、正文或认证配置。延续原有官方登录识别规则：`openai-codex`，或能通过当前本机 OAuth 配置识别的 `openai`；不扩展到未知 API 登录来源。Monitor 接收失败不改变模型结果，未启动时诊断不保存到磁盘。需要支持 provider / message hooks，已在 `@earendil-works/pi-coding-agent` 1.1.0 验证加载。没有请求开始或首内容事件的记录保持未知。
 
-### Pi
-
-点击“导出 Pi 扩展”，程序将内置的 `codex-monitor.ts` 写入 Monitor 数据目录的 `integrations/pi/`，并复制加载命令。该扩展使用本机已安装 Pi 的 provider / message hooks，已在 `@earendil-works/pi-coding-agent` 1.1.0 验证加载。
-
-```powershell
-pi -e "$env:APPDATA\codex-monitor\integrations\pi\codex-monitor.ts"
-```
-
-如需自动加载，可将导出文件复制到 `PI_CODING_AGENT_DIR/extensions/codex-monitor.ts`（默认 `%USERPROFILE%\.pi\agent\extensions\codex-monitor.ts`），然后重启 Pi 或执行 `/reload`。自动加载后正常启动 `pi` 即可，无需再用 `-e` 加载另一份相同扩展。
-
-扩展不会更改模型请求、正文或认证配置，只发送时间、Token 签名、响应 ID、模型和诊断类别。延续原有官方登录识别规则：`openai-codex`，或能通过当前本机 OAuth 配置识别的 `openai`；不扩展到未知 API 登录来源。Monitor 接收失败时不阻塞或改变模型结果；未启动 Monitor 时的诊断不会保存到磁盘。
-
-如手动加载仓库中的扩展，可使用 `integrations/pi/codex-monitor.ts`。自定义接收端口时设置 `CODEX_MONITOR_OTEL_URL=http://127.0.0.1:<端口>/v1/logs`，扩展只接受 `127.0.0.1` 上的 HTTP 目标。Pi 需要支持 `before_provider_request`、`before_provider_headers`、`after_provider_response`、`message_update` 和 `message_end` 钩子；没有请求开始或首内容事件的记录保持未知。
+如独立手动加载仓库中的 `integrations/pi/codex-monitor.ts`，可设置 `CODEX_MONITOR_OTEL_URL=http://127.0.0.1:<端口>/v1/logs`；扩展只接受 `127.0.0.1` 上的 HTTP 目标。已有该环境变量时需与 Monitor 端口一致。自动加载后不要再用 `-e` 加载另一份相同扩展。
 
 ## 失败、重试与关联口径
 

@@ -48,15 +48,33 @@ func (s *Service) stopTelemetry() {
 	}
 }
 
-func (s *Service) configureTelemetry() error {
+func (s *Service) configureTelemetry(autoPort bool) error {
 	s.stopTelemetry()
 	settings := s.store.settings()
 	port := int(num(settings["telemetryPort"]))
 	status := Object{"enabled": truth(settings["telemetryEnabled"]), "listening": false, "port": port, "config": telemetryConfig(port)}
-	if s.config.Offline || !truth(settings["telemetryEnabled"]) {
+	if s.config.Offline {
+		return s.store.set("telemetryStatus", status)
+	}
+	if !truth(settings["telemetryEnabled"]) {
+		s.setupTelemetryClients(status, false, port)
 		return s.store.set("telemetryStatus", status)
 	}
 	listener, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil && autoPort {
+		for candidate := port + 1; candidate <= port+16 && candidate <= 65535; candidate++ {
+			listener, err = net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", candidate))
+			if err == nil {
+				port = candidate
+				if _, err = s.store.saveSettings(Object{"telemetryPort": port}); err != nil {
+					listener.Close()
+					return err
+				}
+				status["port"], status["config"] = port, telemetryConfig(port)
+				break
+			}
+		}
+	}
 	if err != nil {
 		status["error"] = "采集端口不可用，请选择其他端口"
 		_ = s.store.set("telemetryStatus", status)
@@ -67,6 +85,19 @@ func (s *Service) configureTelemetry() error {
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
 	s.telemetry = server
 	status["listening"] = true
+	s.setupTelemetryClients(status, true, port)
+	previous := obj(s.store.get("telemetryStatus"))
+	for _, field := range []string{"receivedAt", "receivedEvents", "totalEvents", "ttftSamples"} {
+		if previous[field] != nil {
+			status[field] = previous[field]
+		}
+	}
+	for _, client := range []string{"codex", "pi"} {
+		state := obj(status[client])
+		if truth(obj(previous[client])["restartRequired"]) || truth(state["changed"]) {
+			state["restartRequired"] = true
+		}
+	}
 	if err = s.store.set("telemetryStatus", status); err != nil {
 		listener.Close()
 		s.telemetry = nil
