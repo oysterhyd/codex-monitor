@@ -37,6 +37,11 @@ type App struct {
 	page                                                int
 	viewIndex, metricIndex, settingsSection, quotaIndex int
 	recordPage, breakdownPage                           int
+	historyMode, callPage, detailPage                   int
+	callSearch, expandedCall                            string
+	telemetryPortDraft                                  string
+	callState, taskCallState                            ui.ListState
+	selectedCall                                        int
 	search, command, toast, errorText                   string
 	busy, loading, commandOpen, customOpen, quitting    bool
 	startDate, endDate                                  time.Time
@@ -74,7 +79,7 @@ type App struct {
 }
 
 func NewApp() *App {
-	return &App{data: Object{}, filter: Object{"range": "today"}, recordPage: 1, breakdownPage: 1, selectedRecord: -1, mainFade: widgetMotion{target: 1}, snapshotPage: -1,
+	return &App{data: Object{}, filter: Object{"range": "today"}, recordPage: 1, breakdownPage: 1, callPage: 1, detailPage: 1, selectedCall: -1, selectedRecord: -1, mainFade: widgetMotion{target: 1}, snapshotPage: -1,
 		startDate: time.Now(), endDate: time.Now(), translations: map[string]string{}, systemTranslations: map[string]string{}, accountDrafts: map[string]string{},
 		priceForm: map[string]string{"model": "", "input": "", "cached": "", "output": "", "cache_write": "0", "effective": "1970-01-01T00:00"}}
 }
@@ -308,6 +313,10 @@ func (a *App) requestFilter() Object {
 	f["view"] = []string{"models", "projects", "tasks"}[a.viewIndex]
 	f["recordPage"] = a.recordPage
 	f["pageSize"] = 50
+	if a.historyMode == 1 {
+		f["historyMode"] = "calls"
+	}
+	f["callPage"], f["detailPage"] = a.callPage, a.detailPage
 	return f
 }
 func (a *App) load() {
@@ -375,6 +384,10 @@ func (a *App) change(key string, value any) {
 	}
 	a.recordPage = 1
 	a.breakdownPage = 1
+	a.callPage, a.detailPage = 1, 1
+	a.expandedCall = ""
+	delete(a.filter, "detailSession")
+	delete(a.filter, "detailTurn")
 	a.expanded = ""
 	a.generation++
 	a.load()
@@ -539,6 +552,11 @@ func (a *App) updateTray() {
 }
 func (a *App) exportCSV() {
 	f := clone(a.filter)
+	if a.page == 2 && a.historyMode == 1 {
+		f["exportMode"] = "calls"
+		delete(f, "recordSearch")
+		delete(f, "recordStatus")
+	}
 	if a.page == 1 {
 		year := int(number(obj(a.data["activity"])["year"]))
 		f["range"] = "custom"

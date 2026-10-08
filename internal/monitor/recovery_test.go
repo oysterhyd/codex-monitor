@@ -25,7 +25,10 @@ func TestRecoverDatabasePreservesTablesAndPendingWAL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts["kv"] == 0 || counts["prices"] == 0 || len(counts) != 10 {
+	if _, ok := counts["request_events"]; !ok {
+		t.Fatal("request diagnostics table lost")
+	}
+	if counts["kv"] == 0 || counts["prices"] == 0 || len(counts) != 11 {
 		t.Fatalf("missing tables or rows: %v", counts)
 	}
 	for suffix, want := range before {

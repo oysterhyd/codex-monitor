@@ -2,7 +2,7 @@ package monitor
 
 import "fmt"
 
-const schemaVersion = 2
+const schemaVersion = 3
 const codexParserVersion = 2
 const piParserVersion = 2
 
@@ -32,6 +32,23 @@ func (s *Store) migrate() error {
             UPDATE sessions SET source='desktop' WHERE origin='Codex Desktop';
             UPDATE sessions SET source='pi' WHERE origin='pi · 官方 Codex';
             CREATE INDEX sessions_source ON sessions(source,id);`); err != nil {
+			return err
+		}
+	}
+	if version < 3 {
+		if err := s.exec(`CREATE TABLE request_events(
+            id TEXT PRIMARY KEY,ts TEXT NOT NULL,session TEXT NOT NULL,turn TEXT,model TEXT,
+            kind TEXT NOT NULL,usage_id TEXT,response_id TEXT,input INTEGER,cached INTEGER,output INTEGER,reasoning INTEGER,
+            ttft REAL,attempt INTEGER,http_status INTEGER,error_code TEXT,source TEXT NOT NULL,
+            association TEXT,request_key TEXT,account TEXT NOT NULL DEFAULT 'unassigned');
+            CREATE INDEX request_events_time ON request_events(ts);
+            CREATE INDEX request_events_turn ON request_events(session,turn,ts);
+            CREATE UNIQUE INDEX request_events_usage ON request_events(usage_id) WHERE usage_id IS NOT NULL;
+            CREATE INDEX request_events_account ON request_events(account,ts);
+            CREATE INDEX request_events_request_key ON request_events(session,request_key);`); err != nil {
+			return err
+		}
+		if err := s.exec("CREATE INDEX IF NOT EXISTS usage_session_time ON usage(session,ts)"); err != nil {
 			return err
 		}
 	}

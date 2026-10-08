@@ -58,5 +58,7 @@
   "添加账号": "Add account",
   "保存": "Save",
   "账号名称须为 1–100 个字符": "Account name must contain 1–100 characters",
-  "账号不存在": "Account does not exist"
+  "账号不存在": "Account does not exist",
+  "采集端口须为 1024–65535 的整数": "Collection port must be an integer from 1024 to 65535",
+  "采集端口不可用，请选择其他端口": "Collection port unavailable; choose another port"
 }

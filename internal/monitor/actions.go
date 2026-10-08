@@ -16,10 +16,16 @@ func (s *Store) saveSettings(input Object) (Object, error) {
 	if v := text(input["theme"]); v == "system" || v == "light" || v == "dark" {
 		r["theme"] = v
 	}
-	for _, k := range []string{"muted", "autoStart"} {
+	for _, k := range []string{"muted", "autoStart", "telemetryEnabled"} {
 		if v, ok := input[k].(bool); ok {
 			r[k] = v
 		}
+	}
+	if v, ok := input["telemetryPort"]; ok {
+		if !validNumber(v) || num(v) < 1024 || num(v) > 65535 || num(v) != float64(int(num(v))) {
+			return nil, fmt.Errorf("采集端口须为 1024–65535 的整数")
+		}
+		r["telemetryPort"] = v
 	}
 	if v, ok := input["quotaInterval"]; ok {
 		if num(v) != 60 && num(v) != 120 && num(v) != 300 {
@@ -98,7 +104,7 @@ func (s *Store) saveAccount(p Object) (Object, error) {
 }
 func (s *Store) clear(now time.Time) error {
 	e := s.transaction(func() error {
-		if e := s.exec("DELETE FROM usage;DELETE FROM turns;DELETE FROM quotas;DELETE FROM notices;"); e != nil {
+		if e := s.exec("DELETE FROM usage;DELETE FROM turns;DELETE FROM quotas;DELETE FROM notices;DELETE FROM request_events;"); e != nil {
 			return e
 		}
 		settings := s.settings()

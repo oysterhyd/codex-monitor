@@ -52,6 +52,17 @@ func (a *App) breakdownRows(key string) []Object {
 
 func (a *App) history(c *ui.Context) {
 	a.summaryStrip(c)
+	previousMode := a.historyMode
+	segment(c, &a.historyMode, []string{a.tr("任务分析"), a.tr("逐次调用")}, nil, 240, 35)
+	if previousMode != a.historyMode {
+		a.mainScroll.Y = 0
+		a.generation++
+		a.load()
+	}
+	if a.historyMode == 1 {
+		a.calls(c)
+		return
+	}
 	panel(c, a.tr("消耗明细"), a.tr("共 {0} 条", len(objects(a.data[[]string{"models", "projects", "tasks"}[a.viewIndex]]))), func() {
 		previous := a.viewIndex
 		ui.Row(c).Gap(8).Children(func() {
@@ -198,8 +209,17 @@ func (a *App) history(c *ui.Context) {
 				} else {
 					a.expanded = identity
 				}
+				a.detailPage = 1
+				a.expandedCall = ""
+				delete(a.filter, "detailSession")
+				delete(a.filter, "detailTurn")
+				if a.expanded != "" {
+					a.filter["detailSession"], a.filter["detailTurn"] = v["session"], v["id"]
+				}
+				a.generation++
+				a.load()
 			}
-		}).Height(float32(len(rows)) * 75).Label(a.tr("任务运行记录表格"))
+		}).Height(float32(min(8, len(rows))) * 75).Label(a.tr("任务运行记录表格"))
 
 		if len(rows) == 0 {
 			ui.Text(c, a.tr("这个时间范围内还没有记录"))
@@ -233,6 +253,7 @@ func (a *App) history(c *ui.Context) {
 						})
 					}
 					ui.Text(c, a.tr("任务耗时")+" "+a.duration(row["duration"])+" · "+a.tr("首 Token 延迟")+" "+a.duration(row["ttft"]))
+					a.taskCalls(c, row)
 				})
 			}
 		}

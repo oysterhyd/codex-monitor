@@ -112,3 +112,28 @@ func TestRejectFutureDatabaseSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestVersionTwoRequestMigrationPreservesUsageAndRollsBackFailure(t *testing.T) {
+	s := testStore(t)
+	if err := s.exec("INSERT INTO usage(id,input,output,account) VALUES('preserved',100,20,'a'); DROP TABLE request_events; PRAGMA user_version=2; CREATE INDEX request_events_time ON usage(ts)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.transaction(s.migrate); err == nil {
+		t.Fatal("expected request index conflict")
+	}
+	if num(s.mustOne("PRAGMA user_version")["user_version"]) != 2 || len(s.mustOne("SELECT 1 FROM sqlite_master WHERE name='request_events'")) != 0 {
+		t.Fatal("request migration did not roll back")
+	}
+	if err := s.exec("DROP INDEX request_events_time"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.transaction(s.migrate); err != nil {
+		t.Fatal(err)
+	}
+	if row := s.mustOne("SELECT input,output,account FROM usage WHERE id='preserved'"); num(row["input"]) != 100 || num(row["output"]) != 20 || row["account"] != "a" {
+		t.Fatal(row)
+	}
+	if num(s.mustOne("PRAGMA user_version")["user_version"]) != 3 {
+		t.Fatal("schema version")
+	}
+}

@@ -149,7 +149,7 @@ func projectOf(sessions map[string]Object, id any) string {
 	}
 	return p
 }
-func (s *Store) Snapshot(input Object, now time.Time) (Object, error) {
+func (s *Store) Snapshot(input Object, now time.Time) (out Object, err error) {
 	f := s.resolve(input)
 	start, end, e := Bounds(f, now)
 	if e != nil {
@@ -193,6 +193,27 @@ func (s *Store) Snapshot(input Object, now time.Time) (Object, error) {
 	requested := max(1, int(num(f["recordPage"])))
 	prices := s.prices()
 	pricing := indexPrices(prices)
+	defer func() {
+		if out == nil {
+			return
+		}
+		if has("all", "history") {
+			out["calls"] = Object{}
+			if has("all") || f["historyMode"] == "calls" {
+				out["calls"] = s.callSnapshot(f, lo, hi, pricing)
+			}
+			out["callDetails"] = s.taskCallSnapshot(f, pricing)
+			out["timingCoverage"] = callCoverage(s)
+		}
+		if has("all", "history", "settings") {
+			out["telemetry"] = s.get("telemetryStatus")
+			out["requestDiagnostics"] = s.get("requestDiagnostics")
+			if out["telemetry"] == nil {
+				port := int(num(s.settings()["telemetryPort"]))
+				out["telemetry"] = Object{"listening": false, "port": port, "config": telemetryConfig(port)}
+			}
+		}
+	}()
 	sessions := map[string]Object{}
 	available := []Object{}
 	if optionsWanted || truth(f["project"]) {
@@ -576,6 +597,9 @@ func (s *Store) Export(f Object, now time.Time) (string, error) {
 	start, end, e := Bounds(f, now)
 	if e != nil {
 		return "", e
+	}
+	if f["exportMode"] == "calls" {
+		return s.exportCalls(f, iso(start), iso(end)), nil
 	}
 	conditions := []string{"u.ts>=?", "u.ts<?"}
 	params := []any{iso(start), iso(end)}

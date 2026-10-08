@@ -214,9 +214,9 @@ func (s *Store) Scan(ctx context.Context, home, piHome, piSessions string, full 
 		if len(o) == 0 || o["account"] == Unknown {
 			continue
 		}
-		for _, t := range []string{"usage", "turns", "quotas"} {
+		for _, t := range []string{"usage", "turns", "quotas", "request_events"} {
 			piSource := source != "codex"
-			if piSource && t == "quotas" {
+			if piSource && (t == "quotas" || t == "request_events") {
 				continue
 			}
 			col := "ts"
@@ -232,6 +232,9 @@ func (s *Store) Scan(ctx context.Context, home, piHome, piSessions string, full 
 				}
 				scope = " AND " + not + "EXISTS (SELECT 1 FROM sessions s WHERE s.id=" + t + ".session AND s.origin=?)"
 				args = append(args, PiOrigin)
+				if t == "request_events" {
+					scope += " AND substr(session,1,3)!='pi:'"
+				}
 			}
 			if piSource {
 				kind := PiKind
@@ -248,6 +251,18 @@ func (s *Store) Scan(ctx context.Context, home, piHome, piSessions string, full 
 			if e := s.exec("UPDATE "+t+" SET account=? WHERE account=? AND "+col+">=? AND "+col+"<=?"+scope, args...); e != nil {
 				return nil, e
 			}
+		}
+	}
+	diagnosticCount, diagnosticStatus := s.scanRequestDiagnostics(ctx, home)
+	if e := s.set("requestDiagnostics", diagnosticStatus); e != nil {
+		return nil, e
+	}
+	if diagnosticCount > 0 {
+		changed = true
+	}
+	if changed {
+		if e := s.reconcileRequestEvents(); e != nil {
+			return nil, e
 		}
 	}
 	exists := func(p string) bool { _, e := os.Stat(p); return p != "" && e == nil }

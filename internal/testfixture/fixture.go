@@ -83,6 +83,28 @@ func Seed(dir string) error {
 		if err = exec("INSERT INTO usage VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", fmt.Sprintf("native-usage-%d", i), session, id, stamp(started), model, 10000+i, 5000+i, 1000+i, 200, 0, []string{"pi · openai", "逐次记录"}[i%2], accounts[i%3]); err != nil {
 			return err
 		}
+		if i%9 != 0 {
+			if err = exec("INSERT INTO request_events(id,ts,session,turn,model,kind,usage_id,ttft,source,association,account) VALUES(?,?,?,?,?,'completed',?,?,'otel','response_id',?)", fmt.Sprintf("native-timing-%d", i), stamp(started), session, id, model, fmt.Sprintf("native-usage-%d", i), 500+i*37, accounts[i%3]); err != nil {
+				return err
+			}
+		}
+		if i%40 == 0 {
+			for n := 1; n <= 3; n++ {
+				at := stamp(started.Add(time.Duration(n) * 10 * time.Second))
+				usageID := fmt.Sprintf("native-response-%d-%d", i, n)
+				if err = exec("INSERT INTO usage VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", usageID, session, id, at, model, 12000+n*8000, 9000+n*5000, 800+n*500, 200+n*100, 0, "逐次记录", accounts[i%3]); err != nil {
+					return err
+				}
+				if err = exec("INSERT INTO request_events(id,ts,session,turn,model,kind,usage_id,ttft,source,association,account) VALUES(?,?,?,?,?,'completed',?,?,'otel','time_tokens',?)", "timing-"+usageID, at, session, id, model, usageID, 700+n*1400, accounts[i%3]); err != nil {
+					return err
+				}
+			}
+			for n, kind := range []string{"failed", "retry"} {
+				if err = exec("INSERT INTO request_events(id,ts,session,turn,model,kind,attempt,http_status,error_code,source,account) VALUES(?,?,?,?,?,?,1,429,'rate_limit','otel',?)", fmt.Sprintf("native-event-%d-%d", i, n), stamp(started.Add(time.Duration(5+n)*time.Second)), session, id, model, kind, accounts[i%3]); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	if err = exec("INSERT INTO prices(model,effective,input,cached,output,cache_write,source) VALUES(?,?,?,?,?,?,?)", "gpt-6-astra", stamp(date.AddDate(0, 0, -10)), 11, 1.1, 51, 13, "手动设置"); err != nil {
 		return err

@@ -9,7 +9,7 @@ import (
 
 // The dashboard, transparent desktop widget and data service run in Go.
 //
-//go:embed assets/locales/*.json assets/icon.png assets/monitor-glass.png
+//go:embed assets/locales/*.json assets/icon.png assets/monitor-glass.png integrations/pi/codex-monitor.ts
 var resources embed.FS
 
 func main() {

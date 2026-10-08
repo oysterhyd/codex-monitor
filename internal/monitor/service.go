@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -39,6 +40,7 @@ type Service struct {
 	quotaBusy      bool
 	quotaBinary    string
 	refreshPending []chan reply
+	telemetry      *http.Server
 }
 
 func Start(config Config) (*Service, error) {
@@ -67,10 +69,12 @@ func (s *Service) loop() {
 	defer close(s.Events)
 	defer s.release()
 	defer s.store.Close()
+	defer s.stopTelemetry()
 	scan := time.NewTicker(3 * time.Second)
 	quota := time.NewTicker(5 * time.Second)
 	defer scan.Stop()
 	defer quota.Stop()
+	_ = s.configureTelemetry()
 	if !s.config.Offline {
 		s.scan(false)
 		s.beginQuota()
@@ -162,7 +166,14 @@ func (s *Service) handle(method string, raw json.RawMessage) (out json.RawMessag
 		}
 		value = s.store.Widget(now)
 	case "settings":
+		previous := s.store.settings()
 		value, err = s.store.saveSettings(p)
+		if err == nil && (p["telemetryEnabled"] != nil || p["telemetryPort"] != nil) {
+			if err = s.configureTelemetry(); err != nil {
+				_, _ = s.store.saveSettings(previous)
+				_ = s.configureTelemetry()
+			}
+		}
 	case "price":
 		value, err = s.store.savePrice(p)
 	case "deletePrice":
@@ -196,6 +207,19 @@ func (s *Service) handle(method string, raw json.RawMessage) (out json.RawMessag
 			piSessions = v
 		}
 		_, err = s.store.Scan(s.ctx, s.config.Home, piHome, piSessions, true, func(v Object) { s.emit("progress", v) })
+		value = true
+	case "_telemetry":
+		var events []Object
+		if err = json.Unmarshal(raw, &events); err != nil {
+			return nil, err
+		}
+		if err = s.store.ingestRequestEvents(events); err != nil {
+			return nil, err
+		}
+		status := obj(s.store.get("telemetryStatus"))
+		status["receivedAt"], status["receivedEvents"] = iso(now), len(events)
+		status["totalEvents"] = num(status["totalEvents"]) + float64(len(events))
+		err = s.store.set("telemetryStatus", status)
 		value = true
 	default:
 		return nil, fmt.Errorf("未知操作")

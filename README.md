@@ -40,12 +40,14 @@ Codex Monitor 是 Windows x64 本机监测工具。主窗口使用 **MyGO native
 | --- | --- |
 | 用量总览 | Token、请求次数、缓存命中率、费用估算、使用趋势及模型 / 项目排行 |
 | 活动日历 | 年度热力图、活跃天数、连续活动、小时分布与单日详情 |
-| 历史分析 | 任务记录、模型 / 项目 / 会话筛选、搜索、分页、明细与 CSV 导出 |
+| 历史分析 | 任务记录、逐次调用、任务内消耗占比、首字时间、失败重试事件、筛选分页与 CSV 导出 |
 | 账户额度 | 当前 Codex 账号的 5h / 每周额度、重置时间和离散采样曲线 |
 | 设置与价格 | 中英文、主题、提醒、开机启动、账号名称与价格版本 |
 | 桌面小窗口 | 玻璃卡片与 Token 圆球、拖动、置顶、用量趋势和位置恢复 |
 
 支持今日、近 7 天、近 30 天、全部和自定义时间范围。标准 Windows 标题栏保留拖动、缩放、最小化和最大化；关闭窗口后继续在托盘采集，完全退出请使用托盘菜单。
+
+历史分析可切换“任务分析 / 逐次调用”。逐次记录采用紧凑行，显示时间与状态、模型、首字时间、输入 / 输出、缓存命中和费用；点击展开详情。任务内明细显示消耗占比、平均 / P95 首字和失败重试事件，不展示来源列。Desktop、CLI 和已配置的 Pi 用量继续采集。首字时间需在设置中开启本机采集，并配置 Codex OTel 或加载内置 Pi 扩展；完整说明见 [逐次用量与首字分析](docs/request-analysis.md)。
 
 页面、筛选、数字和图表具有过渡反馈，小窗口保留卡片 / 圆球动画与鼠标高光。两种界面均遵循系统减少动态效果设置。
 
@@ -83,9 +85,9 @@ Codex Monitor 是 Windows x64 本机监测工具。主窗口使用 **MyGO native
 
 ## 快速开始
 
-[下载 Windows x64 安装包](https://github.com/oysterhyd/codex-monitor/releases/download/v2.7.1/Codex-Monitor-Setup-2.7.1.exe) · [版本说明与 SHA-256 校验](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.7.1)
+[下载 Windows x64 安装包](https://github.com/oysterhyd/codex-monitor/releases/download/v2.8.0/Codex-Monitor-Setup-2.8.0.exe) · [版本说明与 SHA-256 校验](https://github.com/oysterhyd/codex-monitor/releases/tag/v2.8.0)
 
-运行 `Codex-Monitor-Setup-2.7.1.exe`，按向导选择安装目录。默认安装到 `%LOCALAPPDATA%\Programs\Codex Monitor`，无需管理员权限，并创建桌面和开始菜单快捷方式。
+运行 `Codex-Monitor-Setup-2.8.0.exe`，按向导选择安装目录。默认安装到 `%LOCALAPPDATA%\Programs\Codex Monitor`，无需管理员权限，并创建桌面和开始菜单快捷方式。
 
 安装包内的原生主程序同时包含主窗口和桌面小窗口，使用时无需安装 Go 或 Node.js。实时数据需要本机已有 Codex 安装及登录状态。升级时会移除旧版小窗口已知的 Electron 运行文件，保留用户额外添加的文件。更新前请从托盘完全退出应用；安装和卸载均保留 `%APPDATA%\codex-monitor` 中的统计与设置。
 
@@ -129,6 +131,7 @@ Go 可通过 PATH 查找，也支持 `%LOCALAPPDATA%\Programs\go\bin\go.exe` 或
 | `npm run package` | 构建 native NSIS 安装包及 SHA-256 校验文件 |
 | `npm run package:check` | 隔离验证安装、升级、快捷方式、注册信息和卸载 |
 | `npm test` / `go test ./...` | Go 数据、原生界面和小窗口状态 / 绘制测试 |
+| `npm run test:pi` | Pi 首字 / 失败 / 重试扩展的合成钩子与隐私验证 |
 | `npm run native:check` | 五页、过渡帧、窗口控制及真实 Win32 小窗口验收 |
 | `npm run widget:check` | 同一套原生 UI 验收，包含卡片、圆球、拖动、透明和错误重试 |
 | `npm run test:ui` | 完整原生 UI 验收 |
@@ -151,6 +154,8 @@ Go 可通过 PATH 查找，也支持 `%LOCALAPPDATA%\Programs\go\bin\go.exe` 或
 - **额度**：通过本机 Codex app-server 的 `account/rateLimits/read` 查询，属于当前账号，可能包括其他设备的用量。曲线在重置和采样空档处断开。
 - **缓存命中率**：缓存输入 / 输入 Token；没有输入时保持未知。
 - **实时 TPS**：最近 60 秒日志中的输出 Token / 60，包含等待时间。
+- **首字时间（TTFT）**：逐次调用采用明确的客户端 TTFT 或 Pi provider 钩子测量；未采集时显示未知，不以相邻记录时间差估算。旧日志不能补算首字时间。
+- **失败与重试**：只读 Codex 诊断数据库及可选的本机 OTel / Pi 事件；展示观测到的事件，缺少独立用量时 Token 和费用保持未知。未导出的内部重试不计入，事件数不等于完整网络重试次数。
 - **费用**：按生效时间选择价格版本，显示 API 等值 USD 估算；不是订阅实付账单，未定价记录会明确标注。
 
 近期日志每 3 秒增量扫描，全部目录每 60 秒校验；额度查询间隔可设为 60 / 120 / 300 秒。
@@ -159,7 +164,7 @@ Go 可通过 PATH 查找，也支持 `%LOCALAPPDATA%\Programs\go\bin\go.exe` 或
 
 ## 数据与隐私
 
-统计和设置默认保存在 `%APPDATA%\codex-monitor`，不写入 Codex / pi 原始文件。不保存对话正文、工具调用、认证 token 或 API key；账号使用身份字段的 SHA-256 摘要。无遥测、无跨设备同步，不创建模型请求。
+统计和设置默认保存在 `%APPDATA%\codex-monitor`，不写入 Codex / pi 原始文件。不保存对话正文、工具调用、认证 token 或 API key；账号使用身份字段的 SHA-256 摘要。无外部遥测、无跨设备同步，不创建模型请求。可选的首字采集只在 `127.0.0.1` 接收字段白名单中的统计事件，不转发到外部；错误仅保存固定类别。
 
 | 文件 / 目录 | 用途 |
 | --- | --- |

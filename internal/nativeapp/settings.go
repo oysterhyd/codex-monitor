@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +27,75 @@ func (a *App) setting(key string, value any) {
 		defer cancel()
 		return a.client.Call(ctx, "settings", Object{key: value})
 	}, "")
+}
+
+func (a *App) telemetrySettings(c *ui.Context, settings Object) {
+	panel(c, a.tr("本机首字采集"), "", func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(18).Children(func() {
+			ui.Column(c).Grow(1).Gap(5).Children(func() {
+				ui.Text(c, a.tr("记录逐次首字时间与失败重试")).FontWeight(600)
+				ui.Text(c, a.tr("保留 Desktop、CLI 和 Pi 用量采集；额外接收本机请求诊断，不保存对话、工具内容或登录凭据。")).FontSize(11).TextColor(c.Theme().TextMuted)
+			})
+			enabled := truth(settings["telemetryEnabled"])
+			if ui.Switch(c, &enabled).Label(a.tr("本机首字采集")).Disabled(a.busy).Changed() {
+				a.setting("telemetryEnabled", enabled)
+			}
+		})
+		if a.telemetryPortDraft == "" {
+			a.telemetryPortDraft = str(settings["telemetryPort"])
+		}
+		ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
+			ui.Text(c, a.tr("本机端口")).FontSize(12)
+			ui.TextInput(c, &a.telemetryPortDraft).Width(90).Height(35).Label(a.tr("本机端口"))
+			if ui.Button(c, a.tr("应用端口")).Disabled(a.busy).Clicked() {
+				port, err := strconv.Atoi(a.telemetryPortDraft)
+				if err != nil || port < 1024 || port > 65535 {
+					a.errorText = a.tr("采集端口须为 1024–65535 的整数")
+				} else {
+					a.setting("telemetryPort", port)
+				}
+			}
+		})
+		status := obj(a.data["telemetry"])
+		label := "采集未开启"
+		if truth(status["listening"]) {
+			label = "采集已开启"
+		}
+		ui.Text(c, a.tr(label)+" · 127.0.0.1:"+str(settings["telemetryPort"])).FontSize(12)
+		if str(status["error"]) != "" {
+			ui.Text(c, a.tr(str(status["error"]))).TextColor(c.Theme().Danger).FontSize(12)
+		}
+		if status["receivedAt"] != nil {
+			ui.Text(c, a.tr("最近接收")+" "+shortStamp(status["receivedAt"])).FontSize(11).TextColor(c.Theme().TextMuted)
+		}
+		ui.Text(c, a.tr("Codex：复制配置，合并到 CODEX_HOME/config.toml 的现有 otel 段，再重启 Desktop 或 CLI。Pi：导出扩展后使用复制的命令加载。")).FontSize(12)
+		ui.Row(c).Gap(12).Children(func() {
+			if ui.Button(c, a.tr("复制 Codex 采集配置")).Clicked() {
+				mygo.Clipboard.WriteText(str(status["config"]))
+				a.toast = a.tr("采集配置已复制")
+			}
+			if ui.Button(c, a.tr("导出 Pi 扩展")).Disabled(a.busy).Clicked() {
+				port := str(settings["telemetryPort"])
+				a.perform(func() (any, error) {
+					data, err := fs.ReadFile(a.resources, "integrations/pi/codex-monitor.ts")
+					if err != nil {
+						return nil, err
+					}
+					path := filepath.Join(a.options.Data, "integrations", "pi", "codex-monitor.ts")
+					if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+						return nil, err
+					}
+					data = []byte(strings.ReplaceAll(string(data), "http://127.0.0.1:4319/v1/logs", "http://127.0.0.1:"+port+"/v1/logs"))
+					if err = os.WriteFile(path, data, 0600); err != nil {
+						return nil, err
+					}
+					mygo.Clipboard.WriteText("pi -e \"" + path + "\"")
+					return true, nil
+				}, "Pi 扩展已导出，加载命令已复制")
+			}
+		})
+		ui.Text(c, a.tr("历史日志没有首字时间时无法补算；客户端未导出的内部重试无法观测。")).FontSize(11).TextColor(c.Theme().TextMuted)
+	})
 }
 func (a *App) settings(c *ui.Context) {
 	ui.Tabs(c, &a.settingsSection, a.tr("通用"), a.tr("账号"), a.tr("模型价格"), a.tr("数据与存储")).Height(43).Padding(10, 14).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Label(a.tr("设置分类"))
@@ -88,6 +160,7 @@ func (a *App) settings(c *ui.Context) {
 					}
 				})
 			})
+			a.telemetrySettings(c, settings)
 		case 1:
 			panel(c, a.tr("账号管理"), "", func() {
 				ui.Text(c, a.tr("自动识别本机登录账号；仅保存账号标识摘要和显示名称，不保存登录凭据。可添加历史账号并修改显示名称。"))
